@@ -1,0 +1,1 @@
+git clone https://huggingface.co/bert-base-chinese ./experiment/buffer
