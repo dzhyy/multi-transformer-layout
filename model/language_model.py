@@ -2,13 +2,10 @@
 # encoding=utf-8
 import math
 import copy
-from re import X
 from typing import Optional,List
-from numpy import dtype
 import torch
 from torch import Tensor, device
 import torch.nn as nn
-from torch.nn import (TransformerEncoder, TransformerDecoder, TransformerEncoderLayer, TransformerDecoderLayer)
 import torch.nn.functional as F
 from model.backbone import build_backbone
 from model.position_encoding import PositionalEncoding
@@ -79,15 +76,15 @@ class SublayerConnection(nn.Module):
 
 ##③##
 class LanguageModel(nn.Module):
-    def __init__(self, encoder, src_embed, bbox_embed, img_embed, mix_net,  generator):  # src_embed=TokenEmbedding+PositionalEncoding
+    def __init__(self, encoder, src_embed, bbox_embed, img_embed, pos_embed, args):  # src_embed=TokenEmbedding+PositionalEncoding
         super(LanguageModel, self).__init__()
         self.encoder = encoder
         self.label_embed = src_embed  # embedding model
         self.bbox_embed = bbox_embed
         self.img_embed = img_embed
-        self.generator = generator
-        # self.mix_net = nn.Linear(512*3,512)
-        self.mix_net = mix_net
+        self.pos_embed = pos_embed
+        self.mix_net = MLP(args.d_model*3, args.d_feedforward, args.d_model, 3)
+        self.generator = MLP(args.d_model, args.d_model, 4, 3)
 
     def forward(self, batch):
         label_embedding = self.label_embed(batch.label) # (32,len)->(32,len,512)
@@ -96,6 +93,7 @@ class LanguageModel(nn.Module):
         concate_img_embedding(batch.img_index>0, batch.img, self.img_embed, img_embedding)
         x = torch.cat((label_embedding,bbox_embedding,img_embedding),dim=-1)
         x = self.mix_net(x)
+        x = self.pos_embed(x)
         x = self.encoder(x, batch.mask)
         x = self.generator(x).sigmoid()
         return x
@@ -197,34 +195,24 @@ class PositionWiseFeedForward(nn.Module):
         return self.w_2(self.dropout(F.relu(self.w_1(x))))
 
 
-class Generator(nn.Module):  # 和embedding正好相反，(n_batch,seq_len,d_model)-->(n_batch,seq_len,vocab),最后一维是概率分布
-    def __init__(self, d_model, vocab):
-        super(Generator, self).__init__()
-        self.proj = nn.Linear(d_model, vocab)
-
-    def forward(self, x):
-        return F.log_softmax(self.proj(x), dim=-1)
-
 
 def make_model(args):
     c = copy.deepcopy
     attn = MultiHeadAttention(args.n_heads, args.d_model)                   # (h, d_model, dropout=0.1)
     ffn = PositionWiseFeedForward(args.d_model, args.d_feedforward, args.dropout)   # (d_model, d_ff, dropout=0.1)
-    position = PositionalEncoding(args.d_model, args.dropout)         # (emb_size: int, dropout, maxlen: int = 5000)
+    pos_enmbedding = PositionalEncoding(args.d_model, args.dropout)         # (emb_size: int, dropout, maxlen: int = 5000)
     
     label_embedding = TokenEmbedding(args.src_vocab, args.d_model)
     bbox_embedding = MLP(4, args.d_feedforward, args.d_model, 3)
     img_embedding = build_backbone(args)
-    
-    mix_net = MLP(args.d_model*3, args.d_feedforward, args.d_model, 3)
 
     model = LanguageModel(                                 # (encoder, decoder, src_embed, tgt_embed, generator)
         Encoder(EncoderLayer(args.d_model, c(attn), c(ffn), args.dropout), args.n_encoder_layers),
-        nn.Sequential(label_embedding, c(position)),              # (vocab_size, d_model)
+        label_embedding,
         bbox_embedding,
         img_embedding,
-        mix_net,
-        Generator(args.d_model, 4)                       # (d_model, vocab)
+        pos_enmbedding,
+        args
     )
 
     for p in model.parameters():

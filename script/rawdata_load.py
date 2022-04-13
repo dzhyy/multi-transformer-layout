@@ -47,7 +47,7 @@ def load_raw_data(args) ->List[dict]:
         image_file_prefix = image_file_prefix[0].text
         for idx in range(1,99):
             filename = image_file_prefix+f'_{idx}.png'
-            image_filepath = os.path.join(args.img_folder,category,filename)
+            image_filepath = os.path.join(args.img_folder,category)+'/'+filename
             if os.path.exists(image_filepath):
                 images.append(image_filepath)
             else:
