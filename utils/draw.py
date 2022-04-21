@@ -119,12 +119,11 @@ class Render():
 
 
 class LogPainter():
-    def __init__(self, args, layout_processor, mode:RenderMode=RenderMode.SIMPLE, writer=None):
+    def __init__(self, args, mode:RenderMode=RenderMode.SIMPLE, writer=None):
         super(LogPainter,self).__init__()
         self.save_path = os.path.join(args.log_root,'eval_log')
         create_folder(self.save_path)
         clear_folder(self.save_path)
-        self.layout_processor = layout_processor
         self.writer = writer
         self.render = Render(mode)
 
@@ -144,10 +143,9 @@ class LogPainter():
         plt.axis('on')
         return fig
 
-    def log(self, framework, tensor_pred:List, name_prefix:str):
-        title = name_prefix + framework['name']
-        framework_pred = self.layout_processor.sent2framework(tensor_pred, framework)
-        figure = self.plt_framework_comparison(framework_pred, framework, title)
+    def log(self, framework1, framework2, name_prefix:str):
+        title = name_prefix + framework1['name']
+        figure = self.plt_framework_comparison(framework1, framework2, title)
 
         if self.writer is None:
             plt.savefig(os.path.join(self.save_path, f'{title}.png'))

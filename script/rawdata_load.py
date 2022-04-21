@@ -5,107 +5,109 @@ import xml.etree.ElementTree as ET
 from typing import List
 from script.misc import DataFormat
 
+def load_specific_raw_data(args, xmlfile):
+    annotation = {}
+    # annotation: 
+    # {
+    # 'name':               e.g: fashion_0001
+    # 'category': str       e.g: fashion
+    # 'images_filepath':    e.g: ['./dataset/MAGAZINE/images/fashion\\fashion_0001_1.png', ...]
+    # 'height': int         e.g: 300
+    # 'width': int          e.g: 225
+    # 'labels': List[str]   e.g: ['image', 'headline-over-image']
+    # 'polygens':           e.g: [[(x0,y0),(x1,y1),(x2,y2)],[...]...] | use 'utils.layout_process.polytorec()' transform to boxes
+    # 'keyword': Llist[str] e.g: ['seaon','bag']
+    # 'images_index':        e.g: [1,0] | the image polygens index
+    # }
+    break_file = False
+    tree = ET.parse(os.path.join(args.annotation_folder,xmlfile))
+    root = tree.getroot()
+    image_file_prefix = root.findall('filename')
+    category = root.findall('category')
+    size = root.findall('size')
+    layout = root.findall('layout')
+    text = root.findall('text')
+
+    if len(image_file_prefix)!=1 or len(category)!=1 or len(size)!=1 or len(layout)!=1 or len(text) !=1:
+        logging.warning(f'{xmlfile} skipped:find multiple element in xml.')
+        return 'break_file'
+    # category
+    category = category[0].text
+    annotation['category'] = category
+
+
+    # image_file
+    images = []
+    image_file_prefix = image_file_prefix[0].text
+    for idx in range(1,99):
+        filename = image_file_prefix+f'_{idx}.png'
+        image_filepath = os.path.join(args.img_folder,category)+'/'+filename
+        if os.path.exists(image_filepath):
+            images.append(image_filepath)
+        else:
+            break
+    annotation['name'] = image_file_prefix
+    annotation['images_filepath'] = images
+
+    # size
+    width = int(size[0].findall('width')[0].text)
+    height = int(size[0].findall('height')[0].text)
+    annotation['height'] = height
+    annotation['width'] = width
+
+    # polygens and label
+    labels = []
+    polygens = []
+    img_index = []
+    for element in layout[0].findall('element'):
+        try:
+            label = element.get('label')
+            px = [int(i) for i in element.get('polygon_x').split(" ")]
+            py = [int(i) for i in element.get('polygon_y').split(" ")]
+            polygen = list(zip(px,py))
+        except Exception as e:
+            logging.warning(f'{xmlfile} skipped:{e}.')
+            break_file = True
+            break
+        if label == 'image':
+            img_index.append(1)
+        else:
+            img_index.append(0)
+        labels.append(label)
+        polygens.append(polygen)
+    if break_file:
+        return 'break_file'
+    annotation['labels'] = labels
+    annotation['polygens'] = polygens
+    annotation['images_index'] = img_index
+    
+    # keywords
+    keywords = []
+    for element in text[0].findall('keyword'):
+        keyword = element.text
+        keywords.append(keyword)
+    annotation['keyword'] = keywords
+    
+    '''
+    judege and add boxes( x1y1x2y2 format)
+    '''
+    if sum(annotation['images_index']) !=len (annotation['images_filepath']):
+        logging.warning(f'{xmlfile} skipped:The annotation is not aligned with the obtained picture info.skipped file.')
+        return 'break_file'
+    annotation['bboxes'] = getBoxes(annotation)
+    return annotation
+
+
 
 def load_raw_data(args) ->List[dict]:
     annotation_list = []
     break_count = 0
     for xmlfile in os.listdir(args.annotation_folder):
-        annotation = {}
-        # annotation: 
-        # {
-        # 'name':               e.g: fashion_0001
-        # 'category': str       e.g: fashion
-        # 'images_filepath':    e.g: ['./dataset/MAGAZINE/images/fashion\\fashion_0001_1.png', ...]
-        # 'height': int         e.g: 300
-        # 'width': int          e.g: 225
-        # 'labels': List[str]   e.g: ['image', 'headline-over-image']
-        # 'polygens':           e.g: [[(x0,y0),(x1,y1),(x2,y2)],[...]...] | use 'utils.layout_process.polytorec()' transform to boxes
-        # 'keyword': Llist[str] e.g: ['seaon','bag']
-        # 'images_index':        e.g: [1,0] | the image polygens index
-        # }
-        break_file = False
-        tree = ET.parse(os.path.join(args.annotation_folder,xmlfile))
-        root = tree.getroot()
-        image_file_prefix = root.findall('filename')
-        category = root.findall('category')
-        size = root.findall('size')
-        layout = root.findall('layout')
-        text = root.findall('text')
-
-        if len(image_file_prefix)!=1 or len(category)!=1 or len(size)!=1 or len(layout)!=1 or len(text) !=1:
-            # break_file = True
-            logging.warning(f'{xmlfile} skipped:find multiple element in xml.')
+        result = load_specific_raw_data(args, xmlfile)
+        if result == 'break_file':
             break_count = break_count+1
-            continue
-        # category
-        category = category[0].text
-        annotation['category'] = category
-
-
-        # image_file
-        images = []
-        image_file_prefix = image_file_prefix[0].text
-        for idx in range(1,99):
-            filename = image_file_prefix+f'_{idx}.png'
-            image_filepath = os.path.join(args.img_folder,category)+'/'+filename
-            if os.path.exists(image_filepath):
-                images.append(image_filepath)
-            else:
-                break
-        annotation['name'] = image_file_prefix
-        annotation['images_filepath'] = images
-
-        # size
-        width = int(size[0].findall('width')[0].text)
-        height = int(size[0].findall('height')[0].text)
-        annotation['height'] = height
-        annotation['width'] = width
-
-        # polygens and label
-        labels = []
-        polygens = []
-        img_index = []
-        for element in layout[0].findall('element'):
-            try:
-                label = element.get('label')
-                px = [int(i) for i in element.get('polygon_x').split(" ")]
-                py = [int(i) for i in element.get('polygon_y').split(" ")]
-                polygen = list(zip(px,py))
-            except Exception as e:
-                logging.warning(f'{xmlfile} skipped:{e}.')
-                break_count = break_count+1
-                break_file = True
-                break
-            if label == 'image':
-                img_index.append(1)
-            else:
-                img_index.append(0)
-            labels.append(label)
-            polygens.append(polygen)
-        if break_file:
-            continue
-        annotation['labels'] = labels
-        annotation['polygens'] = polygens
-        annotation['images_index'] = img_index
-        
-        # keywords
-        keywords = []
-        for element in text[0].findall('keyword'):
-            keyword = element.text
-            keywords.append(keyword)
-        annotation['keyword'] = keywords
-        
-        '''
-        judege and add boxes( x1y1x2y2 format)
-        '''
-        if sum(annotation['images_index']) !=len (annotation['images_filepath']):
-            # break_file = True
-            logging.warning(f'{xmlfile} skipped:The annotation is not aligned with the obtained picture info.skipped file.')
-            break_count = break_count+1
-            continue
-        annotation['bboxes'] = getBoxes(annotation)
-
-        annotation_list.append(annotation)
+        else:
+            annotation_list.apped(result)
     logging.info(f'get {len(annotation_list)} pages, break page count={break_count}')
     return annotation_list
 

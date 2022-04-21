@@ -68,21 +68,13 @@ class MutiLoss(nn.Module):
         boxes&boxes_trg:(nb,seq_l_4)
         seq_mask:(nb,seq_l)
         '''
-        seq_mask = seq_mask.reshape(-1).unsqueeze(-1).repeat(1,4)
-        
-        boxes = boxes.reshape(-1,4)
-        boxes = torch.masked_select(boxes,seq_mask)
-        boxes = boxes.reshape(-1,4)
+        bboxes = boxes[seq_mask==True,:]
+        bboxes_trg = boxes_trg[seq_mask==True,:]
 
-        boxes_trg = boxes_trg.reshape(-1,4)
-        boxes_trg = torch.masked_select(boxes_trg,seq_mask)
-        boxes_trg = boxes_trg.reshape(-1,4)
-        test = tensor_cxcywh_to_xyxy(boxes_trg)
-
-        loss_l1 = F.l1_loss(boxes, boxes_trg, reduction='none')
+        loss_l1 = F.l1_loss(bboxes, bboxes_trg, reduction='none')
         loss_l1 = loss_l1.sum() / num_boxes
 
-        loss_giou = 1 - torch.diag(generalized_box_iou(tensor_cxcywh_to_xyxy(boxes),tensor_cxcywh_to_xyxy(boxes_trg)))
+        loss_giou = 1 - torch.diag(generalized_box_iou(tensor_cxcywh_to_xyxy(bboxes),tensor_cxcywh_to_xyxy(bboxes_trg)))
         loss_giou = loss_giou.sum() / num_boxes
 
         loss = self.l1_weight*loss_l1 + self.giou_weight*loss_giou

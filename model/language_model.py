@@ -110,7 +110,7 @@ def concate_img_embedding(img_index,batch_imgs:List,func,img_embedding):
     for b in range(batch_size):
         for l in range(len):
             if bool(img_index[b,l]) is True:
-                result = func(imgs_line[index]) # [1,512]
+                result = func(imgs_line[index].unsqueeze(0)) # [1,512]
                 img_embedding[b,l]=result
                 index = index+1
 

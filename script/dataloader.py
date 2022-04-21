@@ -23,6 +23,22 @@ from script.misc import ClassInfo,DataFormat
 文字没有字数
 '''
 
+def get_raw_data(args,use_buffer = False):
+    buffer_folder = os.path.join(args.log_root,'buffer')
+    create_folder(buffer_folder)
+    if use_buffer is False:
+        remove_file(os.path.join(buffer_folder, 'data.tmp'))
+    if os.path.exists(buffer_filepath):
+        with open(buffer_filepath,'rb') as f:
+            data = pickle.load(f)
+        return data
+    else:
+        data = load_raw_data(args)
+        with open(buffer_filepath,'wb') as f:
+            pickle.dump(data, f)
+        return data
+
+
 def subsequent_mask(size):
     attn_shape = (1,size,size)
     subsequent_mask = np.triu(np.ones(attn_shape),k=1).astype('uint8') #  生成左下角为0（含对角），右上角为1的矩阵
@@ -72,9 +88,9 @@ class LayoutDataset(Dataset):
     def __init__(
             self,
             args,
+            data,
             device,
-            use_buffer = True,
-            mode = 'train'
+            mode='train'
     ):
         self.device = device
         self.original_size = args.input_size
@@ -85,11 +101,7 @@ class LayoutDataset(Dataset):
             grid_format = DataFormat.LTRB,
             num_classes = args.n_classes,
             )
-        buffer_folder = os.path.join(args.log_root,'buffer')
-        create_folder(buffer_folder)
-        if use_buffer is False:
-            remove_file(os.path.join(buffer_folder, 'data.tmp'))
-        self.frameworks = self.preprocess(args, os.path.join(buffer_folder, 'data.tmp'))
+        self.frameworks = data
         self.transform = transforms.Compose([
             transforms.Resize(size=(128, 128)),
             transforms.ToTensor(),
@@ -99,19 +111,6 @@ class LayoutDataset(Dataset):
         # self.EOS = self.layout_processor.EOS #注：不需要EOS，添加EOS后续mask需要maskEOS和PAD两种
         self.PAD = self.layout_processor.PAD
         self.PAD_BOX = (0.5,0.5,1.0,1.0)
-    
-    def preprocess(self, args, buffer_filepath):
-        if os.path.exists(buffer_filepath):
-            with open(buffer_filepath,'rb') as f:
-                data = pickle.load(f)
-            return data
-        else:
-            data = load_raw_data(args)
-            #for framework in data:
-            #    framework['bboxs_norm']= self.layout_processor.framework2sent(framework)
-            with open(buffer_filepath,'wb') as f:
-                pickle.dump(data, f)
-            return data
 
     def __len__(self):
         return len(self.frameworks)

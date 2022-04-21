@@ -36,6 +36,47 @@ def to_cwh_format(
     return center_x, center_y, width, height
 
 
+def box_cxcywh_to_xyxy(x):
+    x_c, y_c, w, h = x.unbind(-1)
+    b = [(x_c - 0.5 * w), (y_c - 0.5 * h),
+         (x_c + 0.5 * w), (y_c + 0.5 * h)]
+    return torch.stack(b, dim=-1)
+
+
+def box_xyxy_to_cxcywh(x):
+    x0, y0, x1, y1 = x.unbind(-1)
+    b = [(x0 + x1) / 2, (y0 + y1) / 2,
+         (x1 - x0), (y1 - y0)]
+    return torch.stack(b, dim=-1)
+
+
+def scale(bbox,old_size:tuple,new_size:tuple):
+    v1,v2,v3,v4 = bbox
+    ox, oy = old_size
+    nx, ny = new_size
+    v1 = v1 / ox
+    v2 = v2 / oy
+    v3 = v3 / ox
+    v4 = v4 / oy
+
+    # 0-1的值放缩回new  w和h
+    if (nx > 1):
+        v1 = round(v1 * nx)
+        v3 = round(v3 * nx)
+    else:
+        v1 = round(v1,4)
+        v3 = round(v3,4)
+    if (ny > 1):
+        v2 = round(v2 * ny)
+        v4 = round(v4 * ny)
+    else:
+        v2 = round(v2,4)
+        v4 = round(v4,4)
+
+    return v1, v2, v3, v4
+
+
+
 
 def scale_with_format(
     element_bbox:tuple,
