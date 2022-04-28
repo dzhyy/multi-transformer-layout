@@ -22,5 +22,4 @@ batch_sentence = [
     '第三个句子不一样。'
 ]
 b = a.process(batch_sentence) # [3,10,768]
-# Q1: 如何对齐
-print()'''
+'''

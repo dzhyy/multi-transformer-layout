@@ -37,7 +37,7 @@ def add_optimization_args(parser):
     group = parser.add_argument_group('Optimization')
     group.add_argument('--n_epochs', default=50, help='')
     group.add_argument('--n_warmup_epochs',default=10,help='How many fist epochs are used to warm up')
-    group.add_argument('--batch_size', default=16, help='')
+    group.add_argument('--batch_size', default=4, help='')
     group.add_argument('--learning_rate', default=1e-4, help='')
 
 def add_dataset_args(parser):

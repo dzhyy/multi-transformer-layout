@@ -17,6 +17,7 @@ from script.rawdata_load import load_raw_data
 from utils.path import remove_file,create_folder
 from script.layout_process import LayoutProcessor, scale_with_format
 from script.misc import ClassInfo,DataFormat
+from model.img_encoding2 import get_model
 '''
 这个数据集（任务）和之前的不同之处：
 图片需要编码
@@ -26,8 +27,9 @@ from script.misc import ClassInfo,DataFormat
 def get_raw_data(args,use_buffer = False):
     buffer_folder = os.path.join(args.log_root,'buffer')
     create_folder(buffer_folder)
+    buffer_filepath = os.path.join(buffer_folder, 'data.tmp')
     if use_buffer is False:
-        remove_file(os.path.join(buffer_folder, 'data.tmp'))
+        remove_file(buffer_filepath)
     if os.path.exists(buffer_filepath):
         with open(buffer_filepath,'rb') as f:
             data = pickle.load(f)
@@ -102,15 +104,31 @@ class LayoutDataset(Dataset):
             num_classes = args.n_classes,
             )
         self.frameworks = data
-        self.transform = transforms.Compose([
-            transforms.Resize(size=(128, 128)),
+        self.class_info = ClassInfo()
+        self.size = 224
+        self.other_transform = transforms.Compose([
             transforms.ToTensor(),
         ])
-        self.class_info = ClassInfo()
+        self.feature_extractor = get_model()
         self.BOS = self.layout_processor.BOS
         # self.EOS = self.layout_processor.EOS #注：不需要EOS，添加EOS后续mask需要maskEOS和PAD两种
         self.PAD = self.layout_processor.PAD
-        self.PAD_BOX = (0.5,0.5,1.0,1.0)
+        self.PAD_BOX = (0.0,0.0,0.0,0.0)
+
+    def _img_transform(self, PILimg:Image):
+        h = PILimg.height
+        w = PILimg.width
+        if isinstance(self.size, tuple) and len(self.size) == 2:
+            height, width = self.size
+        elif h >= w:
+            height = int(h * self.size / w)
+            width = self.size
+        else:
+            height = self.size
+            width = int(w * self.size / h)
+        
+        img = PILimg.resize((width,height),Image.BILINEAR)
+        return self.other_transform(img)
 
     def __len__(self):
         return len(self.frameworks)
@@ -128,8 +146,8 @@ class LayoutDataset(Dataset):
         batch_imgs = []
 
 
-        for item in batch:
-            framework = item[0]
+        for sample in batch:
+            framework = sample[0]
             '''
             {'category': 'travel', 
             'name': 'travel_0259', 
@@ -141,9 +159,9 @@ class LayoutDataset(Dataset):
             'bboxes': [(...), (...), (...)], 
             'bboxs_norm': [[...], [...], [...]]}
             '''
-            bboxs = []
+            num_element = len(framework['labels'])
             labels = []
-            imgs = []
+            bboxs = []
             img_index = framework['images_index']
             bbox_index = []
 
@@ -158,40 +176,61 @@ class LayoutDataset(Dataset):
                 bboxs.append([v1,v2,v3,v4])
                 labels.append(self.class_info[label].id)
                 bbox_index.append(1)
-            for img_path in framework['images_filepath']: # imgs可能为空
-                img = self.transform(Image.open(img_path))
-                imgs.append(img.to(self.device))
+            
+            imgs = torch.cuda.FloatTensor(num_element, 2048).fill_(0)
+            img_index2 = [idx for idx,item in enumerate(img_index) if item == 1]
+            for img_path,index in zip(framework['images_filepath'],img_index2): # imgs可能为空
+                img = self._img_transform(Image.open(img_path)) # [3,224,360]
+                img = img.unsqueeze(0).to(self.device)
+                feature = self.feature_extractor(img) # [1, 2048]
+                imgs[index] = feature
+            ''' the img in one page:     [n_pic <= n_element, 3,unknow,unkonw] -> [n_element, 2048]'''
+            del img_index2
 
-            # BOS EOS (actually PAD)
-            bbox_index = [0] + bbox_index + [0]
-            bboxs = [self.PAD_BOX] + bboxs + [self.PAD_BOX]
-            img_index = img_index + [0]
-            labels = labels + [self.PAD]
+            pad_img = torch.cuda.FloatTensor(1, 2048).fill_(0)
+            # [BOS] sentence [EOS] (actually use 'PAD')
+            labels      = [self.PAD] + labels + [self.PAD]
+            bbox_index  = [0] + bbox_index + [0]
+            bboxs       = [self.PAD_BOX] + bboxs + [self.PAD_BOX]
+            img_index   = [0] + img_index + [0]
+            imgs        = torch.cat([pad_img,imgs,pad_img],dim=0)
 
             batch_framework.append(framework)
             batch_labels.append(torch.tensor(labels))
 
-            batch_bboxs.append(bboxs)
+            batch_bboxs.append(bboxs) #
             batch_bbox_index.append(torch.tensor(bbox_index))
 
-            batch_imgs.append(imgs)
+            batch_imgs.append(imgs) # tensor
             batch_img_index.append(torch.tensor(img_index))
        
         # PAD
         batch_labels = pad_sequence(batch_labels, batch_first=True, padding_value=self.PAD)
         batch_bbox_index = pad_sequence(batch_bbox_index, batch_first=True, padding_value=0)
         batch_img_index = pad_sequence(batch_img_index, batch_first=True, padding_value=0)
-        batch_bboxs = pad_box(batch_bboxs, batch_first= True,padding_box=self.PAD_BOX)
+        all_token = batch_labels.size()[2]
+        batch_bboxs = pad_box(batch_bboxs, batch_bbox_index, padding_box=self.PAD_BOX)
+        batch_img = pad_img(imgs, batch_bbox_index)
         
         return Batch(batch_labels, batch_bboxs ,batch_imgs, batch_img_index, batch_framework,pad=self.PAD,device=self.device)
 
 
-def pad_box(sentences:List,batch_first,padding_box=(0.0,0.0,1.0,1.0)):
+def pad_img(imgs:List, batch_bbox_index ,batch_first=True): #[n_samples,len,3,224,236] ->[n_samples,fix_len,3,224,360]:
+    assert batch_first is True
+    lens = torch.sum(batch_bbox_index,dim=-1)
+    a = torch.max(lens)
+    print()
+
+
+
+def pad_box(sentences:List, batch_bbox_index, batch_first=True,padding_box=(0.0,0.0,1.0,1.0)):
     assert batch_first is True
     max_len = 0
     for sentence in sentences:
         if len(sentence)>max_len:
             max_len = len(sentence)
+    lens = torch.sum(batch_bbox_index,dim=-1)
+    a = torch.max(lens).item()
     new_sentences = []
     for sentence in sentences:
         for _ in range(len(sentence),max_len):

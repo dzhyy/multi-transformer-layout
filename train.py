@@ -14,7 +14,6 @@ from utils.draw import LogPainter
 from script.misc import RenderMode,DataFormat
 from script.criterion import MutiLoss
 from script.layout_process import box_cxcywh_to_xyxy,scale
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 '''
 这个数据集（任务）和之前的不同之处：
 图片需要编码

@@ -7,7 +7,7 @@ import torch
 from torch import Tensor, device
 import torch.nn as nn
 import torch.nn.functional as F
-from model.backbone import build_backbone
+from model.img_encoding import build_backbone
 from model.position_encoding import PositionalEncoding
 
 class MLP(nn.Module):
@@ -76,22 +76,32 @@ class SublayerConnection(nn.Module):
 
 ##③##
 class LanguageModel(nn.Module):
-    def __init__(self, encoder, src_embed, bbox_embed, img_embed, pos_embed, args):  # src_embed=TokenEmbedding+PositionalEncoding
+    def __init__(self, encoder, args):
         super(LanguageModel, self).__init__()
         self.encoder = encoder
-        self.label_embed = src_embed  # embedding model
-        self.bbox_embed = bbox_embed
-        self.img_embed = img_embed
-        self.pos_embed = pos_embed
+
+        self.bbox_embed = MLP(4, args.d_feedforward, args.d_model, 3)
+        self.class_embed = TokenEmbedding(args.src_vocab, args.d_model)
+        self.img_embed = build_backbone(args)
+        self.pos_embed = PositionalEncoding(args.d_model, args.dropout)
+
         self.mix_net = MLP(args.d_model*3, args.d_feedforward, args.d_model, 3)
         self.generator = MLP(args.d_model, args.d_model, 4, 3)
 
     def forward(self, batch):
-        label_embedding = self.label_embed(batch.label) # (32,len)->(32,len,512)
+        '''
+        img,    (32,x<len,)
+        class,  (32,len)    [one-hot_version: (32,len,n)]
+        bbox,   (32,len,4)
+
+        img: (1284, 500 ,20) 20表示20中面部测量单元（动作单元）
+        text:(1284, 50, 300)
+        audio:(1284,375,5)
+        '''
+        class_embedding = self.class_embed(batch.label) # (32,len)->(32,len,512)
         bbox_embedding = self.bbox_embed(batch.bbox) #(32,len,4)->(32,len,512) # TODO 另一种是bbox_index，for循环选择添加，类似img的处理方式
-        img_embedding = torch.zeros(bbox_embedding.shape,dtype=bbox_embedding.dtype,device=bbox_embedding.device)
-        concate_img_embedding(batch.img_index>0, batch.img, self.img_embed, img_embedding)
-        x = torch.cat((label_embedding,bbox_embedding,img_embedding),dim=-1)
+        img_embedding = self.img_embed(batch.img) # (32,x<len,2048,4,4)->
+        x = torch.cat((class_embedding,bbox_embedding,img_embedding),dim=-1)
         x = self.mix_net(x)
         x = self.pos_embed(x)
         x = self.encoder(x, batch.mask)
@@ -100,20 +110,6 @@ class LanguageModel(nn.Module):
         # output shape (n_batch,seq_len,d_model)；不是(n_batch,seq_len,vocab)，generator保存在模型中供调用而非参与计算。如果要生成或计算损失，还要调用计算一下。
         # 维护decoder和encoder的输出形状统一??
         # 对于decoder，src_mask还有用吗?---有用，在尝试注意memory时用到
-
-def concate_img_embedding(img_index,batch_imgs:List,func,img_embedding):
-    imgs_line = []
-    index = 0
-    for imgs in batch_imgs:
-        imgs_line.extend(imgs)
-    batch_size,len = img_index.shape
-    for b in range(batch_size):
-        for l in range(len):
-            if bool(img_index[b,l]) is True:
-                result = func(imgs_line[index].unsqueeze(0)) # [1,512]
-                img_embedding[b,l]=result
-                index = index+1
-
 
 
 class Encoder(nn.Module):
@@ -200,18 +196,10 @@ def make_model(args):
     c = copy.deepcopy
     attn = MultiHeadAttention(args.n_heads, args.d_model)                   # (h, d_model, dropout=0.1)
     ffn = PositionWiseFeedForward(args.d_model, args.d_feedforward, args.dropout)   # (d_model, d_ff, dropout=0.1)
-    pos_enmbedding = PositionalEncoding(args.d_model, args.dropout)         # (emb_size: int, dropout, maxlen: int = 5000)
     
-    label_embedding = TokenEmbedding(args.src_vocab, args.d_model)
-    bbox_embedding = MLP(4, args.d_feedforward, args.d_model, 3)
-    img_embedding = build_backbone(args)
 
-    model = LanguageModel(                                 # (encoder, decoder, src_embed, tgt_embed, generator)
+    model = LanguageModel(
         Encoder(EncoderLayer(args.d_model, c(attn), c(ffn), args.dropout), args.n_encoder_layers),
-        label_embedding,
-        bbox_embedding,
-        img_embedding,
-        pos_enmbedding,
         args
     )
 

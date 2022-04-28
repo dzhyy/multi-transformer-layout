@@ -88,23 +88,19 @@ class Backbone(BackboneBase):
 
 
 class Joiner(nn.Sequential):
-    def __init__(self, backbone, position_embedding, ouput_dim):
-        super().__init__(backbone, position_embedding)
-        self.output_proj = nn.Conv2d(backbone.num_channels, ouput_dim, kernel_size=4)
+    def __init__(self, backbone):
+        super().__init__(backbone)
 
     def forward(self, tensor):
-        x = self[0](tensor) # (1,2048,4,4)
-        # pos = self[1](x).to(x.dtype) # (1,512,4,4) # 直接将一个图片提出512个维度的信息，因此再每个维度上的位置已经无需表示:(1,512,4,4)
-        x = self.output_proj(x) # (1,512,1,1)
+        x = self[0](tensor) # ->(1,2048,4,4)
         return x.flatten(1) # (1,512)
 
 
 def build_backbone(args):
-    position_embedding = build_img_position_encoding(args)
     train_backbone = args.lr_backbone > 0
     return_interm_layers = False # segementation used True
     dilation = False # 详情见detr
     backbone = Backbone(args.backbone, train_backbone, return_interm_layers, dilation)
-    model = Joiner(backbone, position_embedding,ouput_dim=args.d_model)
+    model = Joiner(backbone)
     model.num_channels = backbone.num_channels
     return model
