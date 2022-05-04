@@ -1,6 +1,4 @@
 # encoding=utf-8
-from ast import keyword
-from cv2 import transform
 from torch.utils.data import Dataset
 #from utils.layout_data_processor import SortStrategy, LayoutDataProcessor
 # from utils.data import load_layout
@@ -25,7 +23,7 @@ from model.img_encoding2 import get_model
 '''
 
 def get_raw_data(args,use_buffer = False):
-    buffer_folder = os.path.join(args.log_root,'buffer')
+    buffer_folder = os.path.join(args.buffer,'raw_data')
     create_folder(buffer_folder)
     buffer_filepath = os.path.join(buffer_folder, 'data.tmp')
     if use_buffer is False:
@@ -114,6 +112,7 @@ class LayoutDataset(Dataset):
         # self.EOS = self.layout_processor.EOS #注：不需要EOS，添加EOS后续mask需要maskEOS和PAD两种
         self.PAD = self.layout_processor.PAD
         self.PAD_BOX = (0.0,0.0,0.0,0.0)
+        self.PAD_IMG = torch.cuda.FloatTensor(1, 2048).fill_(0)
 
     def _img_transform(self, PILimg:Image):
         h = PILimg.height
@@ -130,11 +129,31 @@ class LayoutDataset(Dataset):
         img = PILimg.resize((width,height),Image.BILINEAR)
         return self.other_transform(img)
 
+    def _pad_img(self, imgs:List, max_len ,batch_first=True): #[n_samples,len,3,224,236] ->[n_samples,fix_len,3,224,360]:
+        assert batch_first is True
+        batch_imgs = []
+        for img in imgs:
+            for _ in range(img.size()[0], max_len):
+                img = torch.cat([img, self.PAD_IMG],dim=0)
+            batch_imgs.append(img)
+        return torch.cat(batch_imgs)
+                
+
+
+    def _pad_box(self, bboxs:List, max_len, batch_first=True,):
+        assert batch_first is True
+        new_bboxs = []
+        for box in bboxs:
+            for _ in range(len(box),max_len):
+                box = box + [self.PAD_BOX]
+            new_bboxs.append(box)
+        return torch.tensor(new_bboxs)
+
     def __len__(self):
         return len(self.frameworks)
 
     def __getitem__(self, idx):
-        return self.frameworks[idx],
+        return self.frameworks[idx]
 
     def collate_fn(self, batch):
         batch_framework = []
@@ -143,11 +162,11 @@ class LayoutDataset(Dataset):
         batch_imgs = []
         batch_bbox_index = []
         batch_img_index = []
-        batch_imgs = []
+        max_n_tokens = 0 # n_tokens = n_element + 2
 
 
         for sample in batch:
-            framework = sample[0]
+            framework = sample
             '''
             {'category': 'travel', 
             'name': 'travel_0259', 
@@ -187,54 +206,35 @@ class LayoutDataset(Dataset):
             ''' the img in one page:     [n_pic <= n_element, 3,unknow,unkonw] -> [n_element, 2048]'''
             del img_index2
 
-            pad_img = torch.cuda.FloatTensor(1, 2048).fill_(0)
             # [BOS] sentence [EOS] (actually use 'PAD')
             labels      = [self.PAD] + labels + [self.PAD]
             bbox_index  = [0] + bbox_index + [0]
             bboxs       = [self.PAD_BOX] + bboxs + [self.PAD_BOX]
             img_index   = [0] + img_index + [0]
-            imgs        = torch.cat([pad_img,imgs,pad_img],dim=0)
+            imgs        = torch.cat([self.PAD_IMG,imgs,self.PAD_IMG],dim=0)
+            '''n_element -> n_tokens'''
 
-            batch_framework.append(framework)
+            batch_framework.append(framework)       #[dic] 
             batch_labels.append(torch.tensor(labels))
 
-            batch_bboxs.append(bboxs) #
+            batch_bboxs.append(bboxs)               #[list]
             batch_bbox_index.append(torch.tensor(bbox_index))
 
-            batch_imgs.append(imgs) # tensor
+            batch_imgs.append(imgs)                 #[tensor]
             batch_img_index.append(torch.tensor(img_index))
+            if  max_n_tokens < num_element + 2:     # 一个批次的最大token数（包括bos，eos；不包括pad）
+                max_n_tokens = num_element + 2
        
         # PAD
         batch_labels = pad_sequence(batch_labels, batch_first=True, padding_value=self.PAD)
         batch_bbox_index = pad_sequence(batch_bbox_index, batch_first=True, padding_value=0)
         batch_img_index = pad_sequence(batch_img_index, batch_first=True, padding_value=0)
-        all_token = batch_labels.size()[2]
-        batch_bboxs = pad_box(batch_bboxs, batch_bbox_index, padding_box=self.PAD_BOX)
-        batch_img = pad_img(imgs, batch_bbox_index)
+        batch_bboxs = self._pad_box(batch_bboxs, max_n_tokens)
+        batch_imgs = self._pad_img(batch_imgs, max_n_tokens)
+        print()
+        ''' the img in diff page:     [bn, n_tokens <= max_n_tokens, 2048] -> [bn, max_n_tokens, 2048]'''
         
         return Batch(batch_labels, batch_bboxs ,batch_imgs, batch_img_index, batch_framework,pad=self.PAD,device=self.device)
 
 
-def pad_img(imgs:List, batch_bbox_index ,batch_first=True): #[n_samples,len,3,224,236] ->[n_samples,fix_len,3,224,360]:
-    assert batch_first is True
-    lens = torch.sum(batch_bbox_index,dim=-1)
-    a = torch.max(lens)
-    print()
-
-
-
-def pad_box(sentences:List, batch_bbox_index, batch_first=True,padding_box=(0.0,0.0,1.0,1.0)):
-    assert batch_first is True
-    max_len = 0
-    for sentence in sentences:
-        if len(sentence)>max_len:
-            max_len = len(sentence)
-    lens = torch.sum(batch_bbox_index,dim=-1)
-    a = torch.max(lens).item()
-    new_sentences = []
-    for sentence in sentences:
-        for _ in range(len(sentence),max_len):
-            sentence = sentence + [padding_box]
-        new_sentences.append(sentence)
-    return torch.tensor(new_sentences)
         

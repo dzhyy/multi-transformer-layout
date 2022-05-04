@@ -107,7 +107,7 @@ def load_raw_data(args) ->List[dict]:
         if result == 'break_file':
             break_count = break_count+1
         else:
-            annotation_list.apped(result)
+            annotation_list.append(result)
     logging.info(f'get {len(annotation_list)} pages, break page count={break_count}')
     return annotation_list
 

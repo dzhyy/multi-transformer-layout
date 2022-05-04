@@ -17,8 +17,6 @@ def get_model():
     model = models.resnet152(pretrained=True,)
     # test = list(model.children())[:-2]，去掉池化层和flatten层
     model = nn.Sequential(*list(model.children())[:-2], GlobalAvgPool())
-    model = model.cuda()
-
     model.eval()
     print('loaded')
     return model
