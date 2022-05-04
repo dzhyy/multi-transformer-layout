@@ -45,7 +45,7 @@ def add_optimization_args(parser):
 
 def add_dataset_args(parser):
     group = parser.add_argument_group('Data process')
-    group.add_argument('--buffer', default='./buffer', help='')
+    group.add_argument('--buffer', default='./dataset/MAGAZINE/buffer/', help='')
     group.add_argument('--img_folder', default='./dataset/MAGAZINE/images/', help='')
     group.add_argument('--annotation_folder', default='./dataset/MAGAZINE/layoutdata/annotations', help='')
     group.add_argument('--grid_width', default=45, help='')
