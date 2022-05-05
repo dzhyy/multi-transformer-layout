@@ -94,7 +94,11 @@ class MULTModel(nn.Module):
             
     def forward(self, batch):
         x_l = batch.img
+<<<<<<< HEAD
         x_a = batch.box
+=======
+        x_a = batch.bbox
+>>>>>>> 9cce5b3... test:multi-transformer classification
         x_v =  batch.label
         # [3,50,300]
         # [3,375,5]
