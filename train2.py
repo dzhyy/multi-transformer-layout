@@ -50,11 +50,7 @@ def main(args):
         for i_batch, batch in enumerate(loader):
             optimizer.zero_grad()
             output = net(batch)
-<<<<<<< HEAD
-            loss = criterion(output, batch.bbox_trg, batch.n_tokens, batch.seq_mask)
-=======
             loss = criterion(output, batch.y)
->>>>>>> 9cce5b3... test:multi-transformer classification
             loss.backward()
             
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
