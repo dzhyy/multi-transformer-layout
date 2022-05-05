@@ -1,19 +1,14 @@
 
 import os
 import torch
-import logging
 from tqdm import tqdm
 from torch.utils.data import DataLoader
-from tensorboardX import SummaryWriter
-from script.lr_scheduler import get_cosine_schedule_with_warmup
-from script.dataloader import LayoutDataset,get_raw_data
 from model import language_model
-from utils import logger, option, path
+from utils import option
 from utils.draw import LogPainter
-from script.criterion import MutiLoss
 from script.rawdata_load import load_specific_raw_data
-from script.misc import RenderMode,DataFormat
-from train import get_result_print
+from script.misc import RenderMode
+from train2 import get_result_print
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '6'
 

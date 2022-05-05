@@ -18,9 +18,45 @@ class Element():
         self.id = id
         self.color = color
 
+class CategoryInfo(object):
+    # "fashion"'food',"news"，"science",'travel'，'wedding'
+    def __init__(self) -> None:
+        self.fashion = Element('fashion',0,'#FF000088')
+        self.food = Element('food',1,'#00FF0088')
+        self.news = Element("news",2,'#0000FF88')
+        self.science = Element("science",3,'#FFFF0088')
+        self.travel = Element('travel',4,'#00FFFF88')
+        self.wedding = Element('wedding',5,'#0088FFFF')
+        self.n_classes = 6
+        self.name_map={
+            self.fashion.name: self.fashion,
+            self.food.name: self.food,
+            self.news.name: self.news,
+            self.science.name: self.science,
+            self.travel.name: self.travel,
+            self.wedding.name: self.wedding
+
+        }
+        self.id_map={
+            self.fashion.id: self.fashion,
+            self.food.id: self.food,
+            self.news.id: self.news,
+            self.science.id: self.science,
+            self.travel.id: self.travel,
+            self.wedding.id: self.wedding
+        }
+    
+    def __getitem__(self,id):
+        if isinstance(id, str):
+            return self.name_map[id]
+        elif isinstance(id, int):
+            if id >self.n_classes:
+                return self.id_map[self.unknown_class.id]
+            return self.id_map[id]
+
 
 class ClassInfo(object):
-    # "text"，'image',"headline"，"text-over-image",'headline-over-image'，
+    # "text"，'image',"headline"，"text-over-image",'headline-over-image'，5
     def __init__(self) -> None:
         self.text = Element('text',0,'#FF000088')
         self.image = Element('image',1,'#00FF0088')

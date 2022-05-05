@@ -1,4 +1,5 @@
 # encoding=utf-8
+from tkinter import Frame
 from torch.utils.data import Dataset
 #from utils.layout_data_processor import SortStrategy, LayoutDataProcessor
 # from utils.data import load_layout
@@ -6,7 +7,6 @@ import torch
 import os
 import numpy as np
 import pickle
-from PIL import Image
 from typing import List
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
@@ -14,7 +14,7 @@ import torchvision.transforms as transforms
 from script.rawdata_load import load_raw_data
 from utils.path import remove_file,create_folder
 from script.layout_process import LayoutProcessor, scale_with_format
-from script.misc import ClassInfo,DataFormat
+from script.misc import ClassInfo,DataFormat,CategoryInfo
 from model.img_encoding2 import get_model
 '''
 这个数据集（任务）和之前的不同之处：
@@ -44,13 +44,13 @@ def subsequent_mask(size):
     subsequent_mask = np.triu(np.ones(attn_shape),k=1).astype('uint8') #  生成左下角为0（含对角），右上角为1的矩阵
     return torch.from_numpy(subsequent_mask) == 0 # 反转，左下角为True（含对角）的矩阵，右上False（表示遮盖）
 
+category_info = CategoryInfo()
 
 class Batch:
     def __init__(self, 
         batch_labels, 
         batch_bboxs, 
         batch_imgs, 
-        batch_img_index, 
         batch_framework,
         pad,
         device
@@ -61,19 +61,19 @@ class Batch:
         src/tgt:(batch_size,seq_len)
         '''
         self.framework = batch_framework
+
         self.label = batch_labels.to(device)
+        self.bbox = batch_bboxs.to(device)
+        self.img = batch_imgs.to(device)
 
-        '''模型的输出不能没有意义，x1x2y1y2的格式可能会出现(x1,y1)>(x2,y2)的情况，这样没有意义。
-        因此bbox使用的格式是cxcywh的格式，无论何种输出都有意义'''
-        self.bbox = batch_bboxs[:,:-1,:].to(device) # 即便在pad处也填充了值，但是会被mask掉
-        self.bbox_trg = batch_bboxs[:,1:,:].to(device)
-
-        self.img = batch_imgs # 不填充，按照索引使用
-        self.img_index = batch_img_index.to(device)
-        
+        self.bbox_input = batch_bboxs[:,:-1,:]
+        self.bbox_trg = batch_bboxs[:,1:,:]
         self.mask = self.make_std_mask(batch_labels, pad).to(device) # 'pad'+'sub_sequence' mask #注：使用（bbox_index，pad=0）会使得bos也会屏蔽掉，所以不使用这种
-        self.seq_mask = (batch_labels != pad).to(device)
-        self.n_tokens = self.seq_mask.data.sum()
+        self.n_tokens = (batch_labels != pad).data.sum()
+
+
+        self.y = torch.tensor([category_info[frame['category']].id for frame in batch_framework])
+        print()
 
     @staticmethod
     def make_std_mask(seq, pad):
@@ -108,26 +108,23 @@ class LayoutDataset(Dataset):
             transforms.ToTensor(),
         ])
         self.feature_extractor = get_model()
-        self.BOS = self.layout_processor.BOS
+        self.imgs_f_folder = os.path.join(args.buffer,'imgs')
+        # self.BOS = self.layout_processor.BOS
         # self.EOS = self.layout_processor.EOS #注：不需要EOS，添加EOS后续mask需要maskEOS和PAD两种
         self.PAD = self.layout_processor.PAD
         self.PAD_BOX = (0.0,0.0,0.0,0.0)
-        self.PAD_IMG = torch.cuda.FloatTensor(1, 2048).fill_(0)
+        self.PAD_IMG = torch.FloatTensor(1, 2048).fill_(0)
+        self.n_modality = 3
+        self.n_class = args.n_classes + 1 # 5+1 = 6
 
-    def _img_transform(self, PILimg:Image):
-        h = PILimg.height
-        w = PILimg.width
-        if isinstance(self.size, tuple) and len(self.size) == 2:
-            height, width = self.size
-        elif h >= w:
-            height = int(h * self.size / w)
-            width = self.size
-        else:
-            height = self.size
-            width = int(w * self.size / h)
-        
-        img = PILimg.resize((width,height),Image.BILINEAR)
-        return self.other_transform(img)
+    def one_hot(self, label):
+        size = list(label.size())
+        size.append(self.n_class)
+        label = label.reshape(-1)
+        ones = torch.sparse.torch.eye(self.n_class)
+        ones = ones.index_select(0,label)
+        ones = ones.reshape(*size)
+        return ones
 
     def _pad_img(self, imgs:List, max_len ,batch_first=True): #[n_samples,len,3,224,236] ->[n_samples,fix_len,3,224,360]:
         assert batch_first is True
@@ -136,9 +133,8 @@ class LayoutDataset(Dataset):
             for _ in range(img.size()[0], max_len):
                 img = torch.cat([img, self.PAD_IMG],dim=0)
             batch_imgs.append(img)
-        return torch.cat(batch_imgs)
+        return torch.stack(batch_imgs)
                 
-
 
     def _pad_box(self, bboxs:List, max_len, batch_first=True,):
         assert batch_first is True
@@ -178,12 +174,14 @@ class LayoutDataset(Dataset):
             'bboxes': [(...), (...), (...)], 
             'bboxs_norm': [[...], [...], [...]]}
             '''
+            img_filepath = os.path.join(self.imgs_f_folder, framework['name']+'.npy')
             num_element = len(framework['labels'])
             labels = []
             bboxs = []
             img_index = framework['images_index']
             bbox_index = []
 
+            imgs = torch.from_numpy(np.load(img_filepath))
             for label, bbox in zip(framework['labels'], framework['bboxes']):
                 v1,v2,v3,v4 = scale_with_format(
                     tuple(map(lambda x: float(x),bbox)),
@@ -196,16 +194,6 @@ class LayoutDataset(Dataset):
                 labels.append(self.class_info[label].id)
                 bbox_index.append(1)
             
-            imgs = torch.cuda.FloatTensor(num_element, 2048).fill_(0)
-            img_index2 = [idx for idx,item in enumerate(img_index) if item == 1]
-            for img_path,index in zip(framework['images_filepath'],img_index2): # imgs可能为空
-                img = self._img_transform(Image.open(img_path)) # [3,224,360]
-                img = img.unsqueeze(0).to(self.device)
-                feature = self.feature_extractor(img) # [1, 2048]
-                imgs[index] = feature
-            ''' the img in one page:     [n_pic <= n_element, 3,unknow,unkonw] -> [n_element, 2048]'''
-            del img_index2
-
             # [BOS] sentence [EOS] (actually use 'PAD')
             labels      = [self.PAD] + labels + [self.PAD]
             bbox_index  = [0] + bbox_index + [0]
@@ -226,15 +214,14 @@ class LayoutDataset(Dataset):
                 max_n_tokens = num_element + 2
        
         # PAD
-        batch_labels = pad_sequence(batch_labels, batch_first=True, padding_value=self.PAD)
         batch_bbox_index = pad_sequence(batch_bbox_index, batch_first=True, padding_value=0)
         batch_img_index = pad_sequence(batch_img_index, batch_first=True, padding_value=0)
-        batch_bboxs = self._pad_box(batch_bboxs, max_n_tokens)
-        batch_imgs = self._pad_img(batch_imgs, max_n_tokens)
-        print()
+        batch_labels = pad_sequence(batch_labels, batch_first=True, padding_value=self.PAD).cpu().detach() # [bn,len]
+        batch_bboxs = self._pad_box(batch_bboxs, max_n_tokens).cpu().detach()  # [bn,14,4]
+        batch_imgs = self._pad_img(batch_imgs, max_n_tokens).cpu().detach() # [bn,len,2048]
         ''' the img in diff page:     [bn, n_tokens <= max_n_tokens, 2048] -> [bn, max_n_tokens, 2048]'''
         
-        return Batch(batch_labels, batch_bboxs ,batch_imgs, batch_img_index, batch_framework,pad=self.PAD,device=self.device)
+        batch_labels = self.one_hot(batch_labels)
+        return Batch(batch_labels, batch_bboxs, batch_imgs, batch_framework,pad=self.PAD,device=self.device)
 
 
-        

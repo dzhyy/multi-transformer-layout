@@ -1,5 +1,5 @@
 from script.dataloader import get_raw_data
-from torch.utils.data import Dataset,DataLoader
+from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 from model.img_encoding2 import get_model
 from PIL import Image

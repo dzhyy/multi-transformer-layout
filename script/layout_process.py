@@ -11,12 +11,7 @@ import torch
 def calculate_vocab_size(
     num_classes: int,
 ):
-    return num_classes + 2     # 这里的3是特殊字符。
-
-
-def calculate_bos_token_index(vocab_size: int):
-    return vocab_size - 2 
-
+    return num_classes + 1     # 这里的3是特殊字符。
 
 def calculate_pad_token_index(vocab_size: int):
     return vocab_size - 1
@@ -173,7 +168,7 @@ class LayoutProcessor():
         self.grid_format = grid_format
         self.vocab_size = calculate_vocab_size(num_classes)
         self.class_info = ClassInfo()
-        self.BOS = calculate_bos_token_index(self.vocab_size)
+        # self.BOS = calculate_bos_token_index(self.vocab_size)
         # self.EOS = calculate_eos_token_index(self.vocab_size)
         self.PAD = calculate_pad_token_index(self.vocab_size)
 

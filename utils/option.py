@@ -31,6 +31,11 @@ def add_model_args(parser):
     group.add_argument('--n_heads', default=8, help='Number of heads in the multi-head attention models')
     group.add_argument('--dropout', default=0.1, help='Value of dropout')
     group.add_argument('--position_embedding', default='sine', type=str, choices=('sine', 'learned'), help="Type of positional embedding to use on top of the image features")
+    
+    group.add_argument('--box_only', action='store_true',help='box passe, other support prediction')
+    group.add_argument('--label_only', action='store_true',help='label passe, other support prediction')
+    group.add_argument('--img_only', action='store_true',help='imgs passe, other support prediction')
+    group.add_argument('--clip', default=0.8, help='')
     # backbone model
     group.add_argument('--lr_backbone', default=1e-5, type=float)
     group.add_argument('--backbone', default='resnet50', type=str, help="Name of the convolutional backbone to use")
@@ -52,9 +57,9 @@ def add_dataset_args(parser):
     group.add_argument('--grid_height', default=60, help='') # 225*300(div 5->45*60), affect size of 'vocab_size'
     group.add_argument('--input_size',default=(225,300), help='(width,height)')
     group.add_argument('--n_classes',default=5, help='')
-    # parser.add_argument('--buffer', action='store_true', help='use dataset stored in buffer')
 
 def add_log_args(parser):
     group = parser.add_argument_group('Train log')
-    parser.add_argument('--log_root', default='./experiment/',help='Root folder for saving model and log')
+    group.add_argument('--log_root', default='./experiment/',help='Root folder for saving model and log')
+    group.add_argument('--log_interval', default=30, help='')
     group.add_argument('--graph_size', default=(9,12), help='')
