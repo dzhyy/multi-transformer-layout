@@ -28,13 +28,10 @@ def add_model_args(parser):
     group.add_argument('--common_vocab', default=6, help='Number of nn.TransformerEncoderLayer')
     group.add_argument('--n_encoder_layers', default=6, help='Number of nn.TransformerEncoderLayer')
     group.add_argument('--n_decoder_layers', default=6, help='Number of nn.TransformerDecoderLayer')
-    group.add_argument('--n_heads', default=8, help='Number of heads in the multi-head attention models')
+    group.add_argument('--n_heads', default=5, help='Number of heads in the multi-head attention models')
     group.add_argument('--dropout', default=0.1, help='Value of dropout')
     group.add_argument('--position_embedding', default='sine', type=str, choices=('sine', 'learned'), help="Type of positional embedding to use on top of the image features")
     
-    group.add_argument('--box_only', action='store_true',help='box passe, other support prediction')
-    group.add_argument('--label_only', action='store_true',help='label passe, other support prediction')
-    group.add_argument('--img_only', action='store_true',help='imgs passe, other support prediction')
     group.add_argument('--clip', default=0.8, help='')
     # backbone model
     group.add_argument('--lr_backbone', default=1e-5, type=float)
@@ -45,7 +42,7 @@ def add_optimization_args(parser):
     group = parser.add_argument_group('Optimization')
     group.add_argument('--n_epochs', default=50, help='')
     group.add_argument('--n_warmup_epochs',default=10,help='How many fist epochs are used to warm up')
-    group.add_argument('--batch_size', default=4, help='')
+    group.add_argument('--batch_size', default=12, help='')
     group.add_argument('--learning_rate', default=1e-4, help='')
 
 def add_dataset_args(parser):

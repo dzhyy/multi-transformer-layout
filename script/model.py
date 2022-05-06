@@ -9,17 +9,17 @@ class MULTModel(nn.Module):
     def __init__(self, hyp_params):
         """
         Construct a MulT model.
-        l:box
-        a:img
-        v:label
+        l:box   (bn,14,4)
+        a:img   (bn,14,2048)
+        v:label (bn,14,6)
         """
         super(MULTModel, self).__init__()
-        self.orig_d_l, self.orig_d_a, self.orig_d_v = hyp_params.orig_d_l, hyp_params.orig_d_a, hyp_params.orig_d_v # 300,20
-        self.d_l, self.d_a, self.d_v = 50, 30, 30
-        self.vonly = hyp_params.vonly
-        self.aonly = hyp_params.aonly
-        self.lonly = hyp_params.lonly
-        self.num_heads = hyp_params.num_heads
+        self.orig_d_l, self.orig_d_a, self.orig_d_v = 2048, 4, 6
+        self.d_l, self.d_a, self.d_v = 30, 30, 30
+        self.vonly = True
+        self.aonly = True
+        self.lonly = True
+        self.num_heads = hyp_params.n_heads
         self.layers = 5             # 5
         self.attn_dropout = 0.1     # 0.1
         self.attn_dropout_a = 0.0   # 0.0
@@ -93,6 +93,11 @@ class MULTModel(nn.Module):
                                   attn_mask=self.attn_mask)         # 0.1
             
     def forward(self, batch):
+        '''
+        l:img   (bn,14,2048)
+        a:box   (bn,14,4)
+        v:label (bn,14,6)
+        '''
         x_l = batch.img
         x_a = batch.bbox
         x_v =  batch.label

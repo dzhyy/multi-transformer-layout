@@ -12,6 +12,8 @@ from script.layout_process import box_cxcywh_to_xyxy,scale
 from script.model import MULTModel
 import time
 import torch.nn as nn
+from sklearn.metrics import accuracy_score,confusion_matrix
+from utils.draw import plot_confusion_matrix
 '''
 这个数据集（任务）和之前的不同之处：
 图片需要编码
@@ -49,7 +51,7 @@ def main(args):
         start_time = time.time()
         for i_batch, batch in enumerate(loader):
             optimizer.zero_grad()
-            output = net(batch)
+            output, _ = net(batch)
             loss = criterion(output, batch.y)
             loss.backward()
             
@@ -57,30 +59,39 @@ def main(args):
             optimizer.step()
             epoch_loss += loss.item()
             if i_batch % args.log_interval == 0 and i_batch > 0:
-                avg_loss = proc_loss / proc_size
+                avg_loss = epoch_loss / (i_batch+1)
                 elapsed_time = time.time() - start_time
                 print('Batch {:3d}/{:3d} | Time/Batch(ms) {:5.2f} | Train Loss {:5.4f}'.
                       format(i_batch, len(loader), elapsed_time * 1000 / args.log_interval, avg_loss))
-                proc_loss, proc_size = 0, 0
                 start_time = time.time()
         epoch_avg_loss = epoch_loss / len(train_dataloader)
         return epoch_avg_loss
 
     def evaluate(model, criterion, loader):
-        eval_losses = 0
+        epoch_loss = 0
         model.eval()
         net = nn.DataParallel(model)
+        preds = []
+        targets = []
         for i_batch, batch in enumerate(loader):
             with torch.no_grad():
-                output = net(batch)
-                loss = criterion(output, batch.bbox_trg, batch.n_tokens, batch.seq_mask)      
-                eval_losses += loss.item()
-        epoch_avg_loss = eval_losses / len(eval_dataloader)
-        return epoch_avg_loss
+                img, bbox, label, target = batch.img.to(device), batch.bbox.to(device), batch.label.to(device), batch.y.to(device)
+                output, _ = net(img, bbox, label)
+                loss = criterion(output, target)
+
+                pred = torch.argmax(output,dim=-1)
+                preds.extend(pred.cpu().numpy().tolist())
+                targets.extend(target.cpu().numpy().tolist())
+                epoch_loss += loss.item()
+                
+        epoch_avg_loss = epoch_loss / len(eval_dataloader)
+        acc = accuracy_score(targets, preds)
+        matrix = confusion_matrix(targets, preds)
+        return {'acc':acc,'loss':epoch_avg_loss,'matrix':matrix}
 
 
     logger.set_logger(os.path.join(args.log_root,'train.log.txt'))
-    device = torch.device('cpu') if args.cpu is True else torch.device('cuda:0')
+    device = torch.device('cpu') if args.cpu is True else torch.device('cuda')
     
     raw_data = get_raw_data(args,use_buffer=True)
     dataset = LayoutDataset(args, raw_data, device) # Num fo samples: 3860
@@ -113,13 +124,15 @@ def main(args):
 
         start = time.time()
         train_loss = train(model, optimizer, criterion, train_dataloader)
-        eval_loss = evaluate(model, criterion, eval_dataloader)
+        result = evaluate(model, criterion, eval_dataloader)
+        eval_loss = result['loss']
         end = time.time()
 
-        logging.info('Epoch {:2d} | Time {:5.4f} sec | Valid Loss {:5.4f} | Train Loss {:5.4f}'.format(epoch, end-start, train_loss, eval_loss))
-        # logging.info(f'Train loss: {train_epoch_loss}, Eval loss: {eval_epoch_loss}')
+        logging.info('Epoch {:2d} | Time {:5.4f} sec | train Loss {:5.4f} | eval Loss {:5.4f}'.format(epoch, end-start, train_loss, eval_loss))
         writer.add_scalars('loss', {'train': train_loss}, epoch)
         writer.add_scalars('loss', {'valid': eval_loss}, epoch)
+        writer.add_scalar('accuracy', result['acc'], epoch)
+        writer.add_figure(str(epoch), plot_confusion_matrix(result['matrix'],classes=['fashion','food',"news","science",'travel','wedding'],title=str(epoch)))
         writer.add_scalar('learning_rate', optimizer.param_groups[0]["lr"], epoch)
         scheduler.step()
         

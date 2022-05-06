@@ -53,7 +53,6 @@ class Batch:
         batch_imgs, 
         batch_framework,
         pad,
-        device
         ):
         '''
         src_mask:(batch_size,1,seq_len)
@@ -62,18 +61,17 @@ class Batch:
         '''
         self.framework = batch_framework
 
-        self.label = batch_labels.to(device)
-        self.bbox = batch_bboxs.to(device)
-        self.img = batch_imgs.to(device)
+        self.label = batch_labels
+        self.bbox = batch_bboxs
+        self.img = batch_imgs
 
         self.bbox_input = batch_bboxs[:,:-1,:]
         self.bbox_trg = batch_bboxs[:,1:,:]
-        self.mask = self.make_std_mask(batch_labels, pad).to(device) # 'pad'+'sub_sequence' mask #注：使用（bbox_index，pad=0）会使得bos也会屏蔽掉，所以不使用这种
+        self.mask = self.make_std_mask(batch_labels, pad) # 'pad'+'sub_sequence' mask #注：使用（bbox_index，pad=0）会使得bos也会屏蔽掉，所以不使用这种
         self.n_tokens = (batch_labels != pad).data.sum()
 
 
         self.y = torch.tensor([category_info[frame['category']].id for frame in batch_framework])
-        print()
 
     @staticmethod
     def make_std_mask(seq, pad):
@@ -89,10 +87,8 @@ class LayoutDataset(Dataset):
             self,
             args,
             data,
-            device,
             mode='train'
     ):
-        self.device = device
         self.original_size = args.input_size
         self.layout_processor = LayoutProcessor(
             input_size = args.input_size,
@@ -107,7 +103,6 @@ class LayoutDataset(Dataset):
         self.other_transform = transforms.Compose([
             transforms.ToTensor(),
         ])
-        self.feature_extractor = get_model()
         self.imgs_f_folder = os.path.join(args.buffer,'imgs')
         # self.BOS = self.layout_processor.BOS
         # self.EOS = self.layout_processor.EOS #注：不需要EOS，添加EOS后续mask需要maskEOS和PAD两种
@@ -222,6 +217,6 @@ class LayoutDataset(Dataset):
         ''' the img in diff page:     [bn, n_tokens <= max_n_tokens, 2048] -> [bn, max_n_tokens, 2048]'''
         
         batch_labels = self.one_hot(batch_labels)
-        return Batch(batch_labels, batch_bboxs, batch_imgs, batch_framework,pad=self.PAD,device=self.device)
+        return Batch(batch_labels, batch_bboxs, batch_imgs, batch_framework,pad=self.PAD)
 
 
