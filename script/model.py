@@ -50,6 +50,7 @@ class MULTModel(nn.Module):
             self.trans_l_with_a = self.get_network(self_type='la')
             self.trans_l_with_v = self.get_network(self_type='lv')
         if self.aonly:
+            self.trans_a_with_a = self.get_netowrk(self_type='a')
             self.trans_a_with_l = self.get_network(self_type='al')
             self.trans_a_with_v = self.get_network(self_type='av')
         if self.vonly:
@@ -128,6 +129,7 @@ class MULTModel(nn.Module):
 
         if self.aonly:
             # (L,V) --> A
+            h_a_with_as =                                                   # box自注意
             h_a_with_ls = self.trans_a_with_l(proj_x_a, proj_x_l, proj_x_l) # l as value passed [18,2,30]
             h_a_with_vs = self.trans_a_with_v(proj_x_a, proj_x_v, proj_x_v) # v as value passed [18,2,30]
             h_as = torch.cat([h_a_with_ls, h_a_with_vs], dim=2) # [18,2,60]`
