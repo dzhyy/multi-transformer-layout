@@ -16,9 +16,9 @@ class MULTModel(nn.Module):
         super(MULTModel, self).__init__()
         self.orig_d_l, self.orig_d_a, self.orig_d_v = 2048, 4, 6
         self.d_l, self.d_a, self.d_v = 30, 30, 30
-        self.vonly = True
+        self.vonly = False
         self.aonly = True
-        self.lonly = True
+        self.lonly = False
         self.num_heads = hyp_params.n_heads
         self.layers = 5             # 5
         self.attn_dropout = 0.1     # 0.1
@@ -92,15 +92,12 @@ class MULTModel(nn.Module):
                                   embed_dropout=self.embed_dropout, # 0.25
                                   attn_mask=self.attn_mask)         # 0.1
             
-    def forward(self, batch):
+    def forward(self, x_l, x_a, x_v, mask):
         '''
         l:img   (bn,14,2048)
         a:box   (bn,14,4)
         v:label (bn,14,6)
         '''
-        x_l = batch.img
-        x_a = batch.bbox
-        x_v =  batch.label
         # [3,50,300]
         # [3,375,5]
         # [3,500,20]
@@ -121,8 +118,8 @@ class MULTModel(nn.Module):
 
         if self.lonly:
             # (V,A) --> L
-            h_l_with_as = self.trans_l_with_a(proj_x_l, proj_x_a, proj_x_a)    # Dimension (L, N, d_l)
-            h_l_with_vs = self.trans_l_with_v(proj_x_l, proj_x_v, proj_x_v)    # Dimension (L, N, d_l)
+            h_l_with_as = self.trans_l_with_a(proj_x_l, proj_x_a, proj_x_a)
+            h_l_with_vs = self.trans_l_with_v(proj_x_l, proj_x_v, proj_x_v)
             h_ls = torch.cat([h_l_with_as, h_l_with_vs], dim=2)
             h_ls = self.trans_l_mem(h_ls)
             if type(h_ls) == tuple:
@@ -131,18 +128,18 @@ class MULTModel(nn.Module):
 
         if self.aonly:
             # (L,V) --> A
-            h_a_with_ls = self.trans_a_with_l(proj_x_a, proj_x_l, proj_x_l)
-            h_a_with_vs = self.trans_a_with_v(proj_x_a, proj_x_v, proj_x_v)
-            h_as = torch.cat([h_a_with_ls, h_a_with_vs], dim=2)
-            h_as = self.trans_a_mem(h_as)
+            h_a_with_ls = self.trans_a_with_l(proj_x_a, proj_x_l, proj_x_l) # l as value passed [18,2,30]
+            h_a_with_vs = self.trans_a_with_v(proj_x_a, proj_x_v, proj_x_v) # v as value passed [18,2,30]
+            h_as = torch.cat([h_a_with_ls, h_a_with_vs], dim=2) # [18,2,60]`
+            h_as = self.trans_a_mem(h_as)   # l&v atten self
             if type(h_as) == tuple:
                 h_as = h_as[0]
             last_h_a = last_hs = h_as[-1]
 
         if self.vonly:
             # (L,A) --> V
-            h_v_with_ls = self.trans_v_with_l(proj_x_v, proj_x_l, proj_x_l)
-            h_v_with_as = self.trans_v_with_a(proj_x_v, proj_x_a, proj_x_a)
+            h_v_with_ls = self.trans_v_with_l(proj_x_v, proj_x_l, proj_x_l) # pass l
+            h_v_with_as = self.trans_v_with_a(proj_x_v, proj_x_a, proj_x_a) # pass a
             h_vs = torch.cat([h_v_with_ls, h_v_with_as], dim=2)
             h_vs = self.trans_v_mem(h_vs)
             if type(h_vs) == tuple:

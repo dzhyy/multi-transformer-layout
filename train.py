@@ -60,9 +60,7 @@ def main(args):
     model = language_model.make_model(args)
     logging.info(args)
     
-    # criterion = torch.nn.CrossEntropyLoss(ignore_index=dataset.PAD,)
     criterion = MutiLoss()
-
 
     optimizer = AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.learning_rate)
     scheduler = get_cosine_schedule_with_warmup(optimizer=optimizer, num_warmup_steps=args.n_warmup_epochs, num_training_steps=args.n_epochs)
@@ -137,7 +135,6 @@ def main(args):
 
 
 def cli_main():
-    # TODO:使用此函数确定是否使用DDP进行训练
     args = option.get_trainning_args()
     main(args)
 
