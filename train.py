@@ -52,10 +52,10 @@ def main(args):
         start_time = time.time()
         for i_batch, batch in enumerate(loader):
             optimizer.zero_grad()
-            img, bbox, label = batch.img.to(device), batch.bbox.to(device), batch.label.to(device)
+            img, bbox, label, target= batch.img.to(device), batch.bbox.to(device), batch.label.to(device), batch.bbox_trg.to(device)
             mask = batch.mask.to(device), batch.pad_mask.to(device)
             output, _ = net(img, bbox, label, mask)
-            loss = criterion(output, batch.y)
+            loss = criterion(output, target)
             loss.backward()
             
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
@@ -79,7 +79,7 @@ def main(args):
         net = nn.DataParallel(model)
         for i_batch, batch in enumerate(loader):
             with torch.no_grad():
-                img, bbox, label = batch.img.to(device), batch.bbox.to(device), batch.label.to(device)
+                img, bbox, label, target = batch.img.to(device), batch.bbox.to(device), batch.label.to(device), batch.bbox_trg.to(device)
                 mask = batch.mask.to(device), batch.pad_mask.to(device)
                 output, _ = net(img, bbox, label, mask)
 

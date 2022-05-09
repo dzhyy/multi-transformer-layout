@@ -60,7 +60,7 @@ class Batch:
         self.orig_bbox = bbox[:, 1:-1, :]
 
         self.label = self._one_hot(label[:, 1:], num_class)
-        self.bbox = bbox[:,:-1,:]
+        self.bbox = bbox[:,:-1,:]       # [bn,len,4]
         self.bbox_trg = bbox[:,1:,:]
         self.img = img[:,:-1,:]
 

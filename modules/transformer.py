@@ -146,7 +146,7 @@ class TransformerEncoderLayer(nn.Module):
         mask = buffered_future_mask(x, x_k) if self.attn_mask else mask
         x_k = self.maybe_layer_norm(0, x_k, before=True)
         x_v = self.maybe_layer_norm(0, x_v, before=True) 
-        x, _ = self.self_attn(query=x, key=x_k, value=x_v, attn_mask=mask)
+        x, _ = self.self_attn(query=x, key=x_k, value=x_v, attn_mask=mask) # x[9,12,30] x_k[9,12,30], [12,1,9]
         x = F.dropout(x, p=self.res_dropout, training=self.training)
         x = residual + x
         x = self.maybe_layer_norm(0, x, after=True)

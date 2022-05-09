@@ -2,9 +2,12 @@ import torch
 from torch import nn
 from torch.nn import Parameter
 import torch.nn.functional as F
-import sys
+import copy
 
 # Code adapted from the fairseq repo.
+
+def _get_clones(module, N):
+    return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
 class MultiheadAttention(nn.Module):
     """Multi-headed attention.
@@ -12,7 +15,7 @@ class MultiheadAttention(nn.Module):
     """
 
     def __init__(self, embed_dim, num_heads, attn_dropout=0.,
-                 bias=True, add_bias_kv=False, add_zero_attn=False):
+                 bias=True):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -21,34 +24,11 @@ class MultiheadAttention(nn.Module):
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
         self.scaling = self.head_dim ** -0.5
 
-        self.in_proj_weight = Parameter(torch.Tensor(3 * embed_dim, embed_dim))
-        self.register_parameter('in_proj_bias', None)
-        if bias:
-            self.in_proj_bias = Parameter(torch.Tensor(3 * embed_dim))
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        self.linear = _get_clones(nn.Linear(embed_dim, embed_dim), 4)
 
-        if add_bias_kv:
-            self.bias_k = Parameter(torch.Tensor(1, 1, embed_dim))
-            self.bias_v = Parameter(torch.Tensor(1, 1, embed_dim))
-        else:
-            self.bias_k = self.bias_v = None
-
-        self.add_zero_attn = add_zero_attn
-
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        nn.init.xavier_uniform_(self.in_proj_weight)
-        nn.init.xavier_uniform_(self.out_proj.weight)
-        if self.in_proj_bias is not None:
-            nn.init.constant_(self.in_proj_bias, 0.)
-            nn.init.constant_(self.out_proj.bias, 0.)
-        if self.bias_k is not None:
-            nn.init.xavier_normal_(self.bias_k)
-        if self.bias_v is not None:
-            nn.init.xavier_normal_(self.bias_v)
 
     def forward(self, query, key, value, attn_mask=None):
+        # [len,3,30]
         """Input shape: Time x Batch x Channel
         Self-attention can be implemented by passing in the same arguments for
         query, key and value. Timesteps can be masked by supplying a T x T mask in the
@@ -56,82 +36,43 @@ class MultiheadAttention(nn.Module):
         the key by passing a binary ByteTensor (`key_padding_mask`) with shape:
         batch x src_len, where padding elements are indicated by 1s.
         """
-        qkv_same = query.data_ptr() == key.data_ptr() == value.data_ptr()
-        kv_same = key.data_ptr() == value.data_ptr()
 
         tgt_len, bsz, embed_dim = query.size()
+        src_len = key.size(0)
         assert embed_dim == self.embed_dim
-        assert list(query.size()) == [tgt_len, bsz, embed_dim]
         assert key.size() == value.size()
 
-        aved_state = None
+        q, k, v = [l(x) for l, x in zip(self.linear, (query, key, value))] # [len,3,30] -> [len,3,30]
 
-        if qkv_same:
-            # self-attention
-            q, k, v = self.in_proj_qkv(query)
-        elif kv_same:
-            # encoder-decoder attention
-            q = self.in_proj_q(query)
+        q = q.transpose(0, 1).reshape(bsz, tgt_len, self.num_heads, self.head_dim).transpose(1, 2)  # [bn,len,30]->[bn, nheads, len, hdim]
+        k = k.transpose(0, 1).reshape(bsz, -1, self.num_heads, self.head_dim).transpose(1, 2)       # [bn,len,30]->[bn, nheads, len, hdim]
+        v = v.transpose(0, 1).reshape(bsz, -1, self.num_heads, self.head_dim).transpose(1 ,2)       # [bn,len,30]->[bn, nheads, len, hdim]
 
-            if key is None:
-                assert value is None
-                k = v = None
-            else:
-                k, v = self.in_proj_kv(key)
-        else:
-            q = self.in_proj_q(query)
-            k = self.in_proj_k(key)
-            v = self.in_proj_v(value)
-        q = q * self.scaling
-
-        if self.bias_k is not None:
-            assert self.bias_v is not None
-            k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
-            v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
-            if attn_mask is not None:
-                attn_mask = torch.cat([attn_mask, attn_mask.new_zeros(attn_mask.size(0), 1)], dim=1)
-
-        q = q.contiguous().view(tgt_len, bsz * self.num_heads, self.head_dim).transpose(0, 1)
-        if k is not None:
-            k = k.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(0, 1)
-        if v is not None:
-            v = v.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(0, 1)
-
-        src_len = k.size(1)
-
-        if self.add_zero_attn:
-            src_len += 1
-            k = torch.cat([k, k.new_zeros((k.size(0), 1) + k.size()[2:])], dim=1)
-            v = torch.cat([v, v.new_zeros((v.size(0), 1) + v.size()[2:])], dim=1)
-            if attn_mask is not None:
-                attn_mask = torch.cat([attn_mask, attn_mask.new_zeros(attn_mask.size(0), 1)], dim=1)
-        
-        attn_weights = torch.bmm(q, k.transpose(1, 2))
-        assert list(attn_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
+        attn_weights = torch.matmul(q, k.transpose(-2, -1)) * self.scaling # [bn, nheads, len, len]
+        assert list(attn_weights.size()) == [bsz , self.num_heads, tgt_len, src_len]
 
         if attn_mask is not None:
             try:
-                attn_weights += attn_mask.unsqueeze(0)
+                attn_weights.masked_fill(attn_mask.unsqueeze(1)==False, float('-inf')) # [bn, nheads, len, len] mask.unsqueeze(1): [bn,1,len,len] or [bn,1,1,len] value = 0 or -inf
             except:
                 print(attn_weights.shape)
                 print(attn_mask.unsqueeze(0).shape)
                 assert False
                 
         attn_weights = F.softmax(attn_weights.float(), dim=-1).type_as(attn_weights)
-        # attn_weights = F.relu(attn_weights)
-        # attn_weights = attn_weights / torch.max(attn_weights)
         attn_weights = F.dropout(attn_weights, p=self.attn_dropout, training=self.training)
 
-        attn = torch.bmm(attn_weights, v)
-        assert list(attn.size()) == [bsz * self.num_heads, tgt_len, self.head_dim]
+        attn = torch.matmul(attn_weights, v)
+        assert list(attn.size()) == [bsz, self.num_heads, tgt_len, self.head_dim]
 
-        attn = attn.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
-        attn = self.out_proj(attn)
+        attn = attn.transpose(1,2).reshape(bsz, tgt_len, embed_dim).transpose(0,1) # attn.transpose(1,2):''[bn, len, nheads, d_k]'' final: [len, bn, d_model]
+        
+        attn = self.linear[-1](attn)
 
         # average attention weights over heads
         attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
         attn_weights = attn_weights.sum(dim=1) / self.num_heads
-        return attn, attn_weights
+        return attn, attn_weights # [25,3,30]
 
     def in_proj_qkv(self, query):
         return self._in_proj(query).chunk(3, dim=-1)
