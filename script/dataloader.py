@@ -38,20 +38,16 @@ def get_raw_data(args,use_buffer = False):
             pickle.dump(data, f)
         return data
 
-
-def subsequent_mask(size):
-    attn_shape = (1,size,size)
-    subsequent_mask = np.triu(np.ones(attn_shape),k=1).astype('uint8') #  生成左下角为0（含对角），右上角为1的矩阵
-    return torch.from_numpy(subsequent_mask) == 0 # 反转，左下角为True（含对角）的矩阵，右上False（表示遮盖）
-
 category_info = CategoryInfo()
 
 class Batch:
-    def __init__(self, 
-        batch_labels, 
-        batch_bboxs, 
-        batch_imgs, 
-        batch_framework,
+    def __init__(
+        self, 
+        label, 
+        bbox, 
+        img, 
+        framework,
+        num_class,
         pad,
         ):
         '''
@@ -59,28 +55,43 @@ class Batch:
         tgt_mask:(batch_size,seq_len,seq_len)
         src/tgt:(batch_size,seq_len)
         '''
-        self.framework = batch_framework
+        self.framework = framework
+        self.orig_label = label[:, 1:-1]
+        self.orig_bbox = bbox[:, 1:-1, :]
 
-        self.label = batch_labels
-        self.bbox = batch_bboxs
-        self.img = batch_imgs
+        self.label = self._one_hot(label[:, 1:], num_class)
+        self.bbox = bbox[:,:-1,:]
+        self.bbox_trg = bbox[:,1:,:]
+        self.img = img[:,:-1,:]
 
-        self.bbox_input = batch_bboxs[:,:-1,:]
-        self.bbox_trg = batch_bboxs[:,1:,:]
-        self.mask = self.make_std_mask(batch_labels, pad) # 'pad'+'sub_sequence' mask #注：使用（bbox_index，pad=0）会使得bos也会屏蔽掉，所以不使用这种
-        self.n_tokens = (batch_labels != pad).data.sum()
+        self.mask, self.pad_mask = self._make_std_mask(label[:, 1:], pad) # 'pad'+'sub_sequence' mask #注：使用（bbox_index，pad=0）会使得bos也会屏蔽掉，所以不使用这种
+        self.n_tokens = (label != pad).data.sum()
 
-
-        self.y = torch.tensor([category_info[frame['category']].id for frame in batch_framework])
+        self.category_trg = torch.tensor([category_info[frame['category']].id for frame in framework])
 
     @staticmethod
-    def make_std_mask(seq, pad):
+    def _make_std_mask(seq, pad):
+
+        def _subsequent_mask(size):
+            attn_shape = (1,size,size)
+            subsequent_mask = np.triu(np.ones(attn_shape),k=1).astype('uint8') #  生成左下角为0（含对角），右上角为1的矩阵
+            return torch.from_numpy(subsequent_mask) == 0 # 反转，左下角为True（含对角）的矩阵，右上False（表示遮盖）
+        
         # create mask for decoder
         # represent 'pad'+'sub_sequence_mask'
-        
-        subseq_mask = (seq != pad).unsqueeze(-2)
-        subseq_mask = subseq_mask & subsequent_mask(seq.size(-1)).type_as(subseq_mask.data)
-        return subseq_mask
+        pad_mask = (seq != pad).unsqueeze(-2)
+        mask = pad_mask & _subsequent_mask(seq.size(-1)).type_as(pad_mask.data)
+        return mask, pad_mask
+    
+    @staticmethod
+    def _one_hot(label, n_class):
+        size = list(label.size())
+        size.append(n_class)
+        label = label.reshape(-1)
+        ones = torch.sparse.torch.eye(n_class)
+        ones = ones.index_select(0,label)
+        ones = ones.reshape(*size)
+        return ones
 
 class LayoutDataset(Dataset):
     def __init__(
@@ -111,15 +122,6 @@ class LayoutDataset(Dataset):
         self.PAD_IMG = torch.FloatTensor(1, 2048).fill_(0)
         self.n_modality = 3
         self.n_class = args.n_classes + 1 # 5+1 = 6
-
-    def one_hot(self, label):
-        size = list(label.size())
-        size.append(self.n_class)
-        label = label.reshape(-1)
-        ones = torch.sparse.torch.eye(self.n_class)
-        ones = ones.index_select(0,label)
-        ones = ones.reshape(*size)
-        return ones
 
     def _pad_img(self, imgs:List, max_len ,batch_first=True): #[n_samples,len,3,224,236] ->[n_samples,fix_len,3,224,360]:
         assert batch_first is True
@@ -216,7 +218,13 @@ class LayoutDataset(Dataset):
         batch_imgs = self._pad_img(batch_imgs, max_n_tokens).cpu().detach() # [bn,len,2048]
         ''' the img in diff page:     [bn, n_tokens <= max_n_tokens, 2048] -> [bn, max_n_tokens, 2048]'''
         
-        batch_labels = self.one_hot(batch_labels)
-        return Batch(batch_labels, batch_bboxs, batch_imgs, batch_framework,pad=self.PAD)
+        return Batch(
+            label = batch_labels, 
+            bbox = batch_bboxs, 
+            img = batch_imgs, 
+            framework = batch_framework, 
+            num_class = self.n_class, 
+            pad = self.PAD
+            )
 
 

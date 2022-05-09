@@ -1,36 +1,36 @@
 import os
 import torch
 import logging
+import time
 from tqdm import tqdm
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from torch.utils.data import random_split
+import torch.nn as nn
 from tensorboardX import SummaryWriter
 from script.lr_scheduler import get_cosine_schedule_with_warmup
 from script.dataloader import LayoutDataset,get_raw_data
-from model import language_model
 from utils import logger, option, path
 from utils.draw import LogPainter
 from script.misc import RenderMode,DataFormat
 from script.criterion import MutiLoss
 from script.layout_process import box_cxcywh_to_xyxy,scale
+from script.model import MULTModel
 '''
 这个数据集（任务）和之前的不同之处：
 图片需要编码
 文字没有字数
 '''
 
-def get_result_print(batch, pred, step_info, painter,args):
+def get_result_print(batch, pred, step_info, painter, size):
     with torch.no_grad():
         # filter for PAD
-        mask = batch.seq_mask[0].unsqueeze(-1).repeat(1,4)
+        mask = batch.pad_mask[0].unsqueeze(-1).repeat(1,4)
         pred = torch.masked_select(pred[0],mask).reshape(-1,4)
         target = torch.masked_select(batch.bbox_trg[0],mask).reshape(-1,4)
         # scale&format back
         pred1 = box_cxcywh_to_xyxy(pred).cpu().numpy().tolist()
-        bboxes = [scale(bbox,(1,1),args.input_size) for bbox in pred1]
-        '''test0 = box_cxcywh_to_xyxy(batch.bbox_trg[0]).cpu().numpy().tolist()
-        test = [scale(bbox,(1,1),args.input_size) for bbox in test0]'''
+        bboxes = [scale(bbox,(1,1), size) for bbox in pred1]
         base_framework = batch.framework[0]
         framework = {}
         framework['bboxes'] = bboxes
@@ -44,8 +44,55 @@ def get_result_print(batch, pred, step_info, painter,args):
 
 
 def main(args):
+
+    def train(model, optimizer, criterion, loader):
+        epoch_loss = 0
+        model.train()
+        net = nn.DataParallel(model)
+        start_time = time.time()
+        for i_batch, batch in enumerate(loader):
+            optimizer.zero_grad()
+            img, bbox, label = batch.img.to(device), batch.bbox.to(device), batch.label.to(device)
+            mask = batch.mask.to(device), batch.pad_mask.to(device)
+            output, _ = net(img, bbox, label, mask)
+            loss = criterion(output, batch.y)
+            loss.backward()
+            
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+            optimizer.step()
+            epoch_loss += loss.item()
+            if i_batch % args.log_interval == 0 and i_batch > 0:
+                avg_loss = epoch_loss / (i_batch+1)
+                elapsed_time = time.time() - start_time
+                print('Batch {:3d}/{:3d} | Time/Batch(ms) {:5.2f} | Train Loss {:5.4f}'.
+                      format(i_batch, len(loader), elapsed_time * 1000 / args.log_interval, avg_loss))
+                start_time = time.time()
+        epoch_avg_loss = epoch_loss / len(train_dataloader)
+        return epoch_avg_loss
+
+    def evaluate(model, criterion, loader, log_painter):
+        epoch_loss = 0
+        num_log_samples = 3
+        log_iter = len(loader) // num_log_samples
+
+        model.eval()
+        net = nn.DataParallel(model)
+        for i_batch, batch in enumerate(loader):
+            with torch.no_grad():
+                img, bbox, label = batch.img.to(device), batch.bbox.to(device), batch.label.to(device)
+                mask = batch.mask.to(device), batch.pad_mask.to(device)
+                output, _ = net(img, bbox, label, mask)
+
+                if i_batch%log_iter == 0:
+                    get_result_print(batch, output, [epoch, args.n_epochs], log_painter, args.input_size)
+                loss = criterion(output, target)
+                epoch_loss += loss.item()
+                
+        epoch_avg_loss = epoch_loss / len(eval_dataloader)
+        return epoch_avg_loss
+
     logger.set_logger(os.path.join(args.log_root,'train.log.txt'))
-    device = torch.device('cpu') if args.cpu is True else torch.device('cuda:0')
+    device = torch.device('cpu') if args.cpu is True else torch.device('cuda')
     
     raw_data = get_raw_data(args,use_buffer=True)
     dataset = LayoutDataset(args, raw_data, device) # Num fo samples: 3860
@@ -55,9 +102,7 @@ def main(args):
     logging.info(f'Num fo samples:{len(dataset)},train samples:{len(train_dataset)},evaluat samples:{len(eval_dataset)}')
     logging.info(f'Device:{device}')
 
-    args.src_vocab = dataset.layout_processor.vocab_size
-    args.tgt_vocab = dataset.layout_processor.vocab_size
-    model = language_model.make_model(args)
+    model = MULTModel(args)
     logging.info(args)
     
     criterion = MutiLoss()
@@ -70,8 +115,7 @@ def main(args):
     path.clear_folder(os.path.join(args.log_root, "runs"))
     writer = SummaryWriter(comment='layout', log_dir=os.path.join(args.log_root, "runs"))
     log_painter = LogPainter(args, mode=RenderMode.IMAGE)
-    num_log_samples = 3
-    log_iter = len(eval_dataloader) // num_log_samples
+    
     # early stop
     best_perform = float('inf')
     last_epoch = args.n_epochs
@@ -80,45 +124,20 @@ def main(args):
     for epoch in range(1, args.n_epochs + 1):
         logging.info(f'\nepoch_{epoch}/{args.n_epochs}:')
 
-        # model train
-        model.train()
-        train_losses = 0
-        for batch in tqdm(train_dataloader, desc='training'):
-            optimizer.zero_grad()
-            output = model(batch)
-            loss = criterion(output, batch.bbox_trg, batch.n_tokens, batch.seq_mask)
-            loss.backward()
+        start = time.time()
+        train_loss = train(model, optimizer, criterion, train_dataloader)
+        eval_loss = evaluate(model, criterion, eval_dataloader, log_painter)
+        end = time.time()
 
-            optimizer.step()
-            train_losses += loss.item()
-
-        # model eval
-        eval_losses = 0
-        model.eval()
-        step = 0 
-        for batch in tqdm(eval_dataloader, desc='evaluating'):
-            with torch.no_grad():
-                output = model(batch)
-                loss = criterion(output, batch.bbox_trg, batch.n_tokens, batch.seq_mask)
-                
-                if step%log_iter == 0:
-                    get_result_print(batch, output, [epoch, args.n_epochs], log_painter, args)
-                
-                eval_losses += loss.item()
-                step = step+1
-
-        train_epoch_loss = train_losses / len(train_dataloader)
-        eval_epoch_loss = eval_losses / len(eval_dataloader)
-
-        logging.info(f'Train loss: {train_epoch_loss}, Eval loss: {eval_epoch_loss}')
-        writer.add_scalars('loss', {'train': train_epoch_loss}, epoch)
-        writer.add_scalars('loss', {'valid': eval_epoch_loss}, epoch)
+        logging.info('Epoch {:2d} | Time {:5.4f} sec | train Loss {:5.4f} | eval Loss {:5.4f}'.format(epoch, end-start, train_loss, eval_loss))
+        writer.add_scalars('loss', {'train': train_loss}, epoch)
+        writer.add_scalars('loss', {'valid': eval_loss}, epoch)
         writer.add_scalar('learning_rate', optimizer.param_groups[0]["lr"], epoch)
         scheduler.step()
-        
+
         # early stop
-        if(eval_losses < best_perform):
-            best_perform = eval_losses
+        if(eval_loss < best_perform):
+            best_perform = eval_loss
             stop_count = 0
             # model save
             torch.save(model.state_dict(), os.path.join(args.log_root,f'model.epoch_{epoch}_p.pth'))

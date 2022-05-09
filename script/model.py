@@ -20,6 +20,7 @@ class MULTModel(nn.Module):
         self.aonly = True
         self.lonly = False
         self.num_heads = hyp_params.n_heads
+                                    # default:
         self.layers = 5             # 5
         self.attn_dropout = 0.1     # 0.1
         self.attn_dropout_a = 0.0   # 0.0
@@ -28,7 +29,7 @@ class MULTModel(nn.Module):
         self.res_dropout = 0.1      # 0.1
         self.out_dropout = 0.0      # 0.0
         self.embed_dropout = 0.25   # 0.25
-        self.attn_mask = True       # True
+        self.bufferd_attn_mask = False      # True
 
         combined_dim = self.d_l + self.d_a + self.d_v
 
@@ -50,7 +51,7 @@ class MULTModel(nn.Module):
             self.trans_l_with_a = self.get_network(self_type='la')
             self.trans_l_with_v = self.get_network(self_type='lv')
         if self.aonly:
-            self.trans_a_with_a = self.get_netowrk(self_type='a')
+            self.trans_a_with_a = self.get_network(self_type='a')
             self.trans_a_with_l = self.get_network(self_type='al')
             self.trans_a_with_v = self.get_network(self_type='av')
         if self.vonly:
@@ -91,7 +92,7 @@ class MULTModel(nn.Module):
                                   relu_dropout=self.relu_dropout,   #0.1
                                   res_dropout=self.res_dropout,     # 0.1
                                   embed_dropout=self.embed_dropout, # 0.25
-                                  attn_mask=self.attn_mask)         # 0.1
+                                  attn_mask=self.bufferd_attn_mask)         # 0.1
             
     def forward(self, x_l, x_a, x_v, mask):
         '''
@@ -105,6 +106,7 @@ class MULTModel(nn.Module):
         """
         text, audio, and vision should have dimension [batch_size, seq_len, n_features]
         """
+        pad_mask, subseq_pad_mask = mask
         x_l = F.dropout(x_l.transpose(1, 2), p=self.embed_dropout, training=self.training) # [3,300,50]
         x_a = x_a.transpose(1, 2)   # [3,5,375]
         x_v = x_v.transpose(1, 2)   # [3,20,500]
@@ -129,9 +131,14 @@ class MULTModel(nn.Module):
 
         if self.aonly:
             # (L,V) --> A
-            h_a_with_as =                                                   # box自注意
-            h_a_with_ls = self.trans_a_with_l(proj_x_a, proj_x_l, proj_x_l) # l as value passed [18,2,30]
-            h_a_with_vs = self.trans_a_with_v(proj_x_a, proj_x_v, proj_x_v) # v as value passed [18,2,30]
+            '''
+            q: a
+            kv: [l, a, v]
+
+            '''
+            h_a_with_as = self.trans_a_with_a(proj_x_a, proj_x_a, proj_x_a, subseq_pad_mask) # mask:sub+pad    a passed
+            h_a_with_ls = self.trans_a_with_l(proj_x_a, proj_x_l, proj_x_l, pad_mask) # mask:pad        l passed    [18,2,30]
+            h_a_with_vs = self.trans_a_with_v(proj_x_a, proj_x_v, proj_x_v, pad_mask) # mask:pad        v passed    [18,2,30]
             h_as = torch.cat([h_a_with_ls, h_a_with_vs], dim=2) # [18,2,60]`
             h_as = self.trans_a_mem(h_as)   # l&v atten self
             if type(h_as) == tuple:
