@@ -94,11 +94,13 @@ class MULTModel(nn.Module):
                                   embed_dropout=self.embed_dropout, # 0.25
                                   attn_mask=self.bufferd_attn_mask)         # 0.1
             
-    def forward(self, x_l, x_a, x_v, mask):
+    def forward(self, x_l, x_a, x_v, pad_mask, subseq_pad_mask):
         '''
         l:img   (bn,len,2048)
         a:box   (bn,len,4)
         v:label (bn,len,6)
+        pad_mask: [bn,1,len]
+        subseq_pad_mask: [bn,len,len]
         '''
         # [3,50,300]
         # [3,375,5]
@@ -106,7 +108,6 @@ class MULTModel(nn.Module):
         """
         text, audio, and vision should have dimension [batch_size, seq_len, n_features]
         """
-        pad_mask, subseq_pad_mask = mask # [bn,len,len], [bn,1,len]
         x_l = F.dropout(x_l.transpose(1, 2), p=self.embed_dropout, training=self.training) # [3,d1,len]
         x_a = x_a.transpose(1, 2)   # [3,d2,len]
         x_v = x_v.transpose(1, 2)   # [3,d3,len]
@@ -162,5 +163,5 @@ class MULTModel(nn.Module):
         last_hs_proj = self.proj2(F.dropout(F.relu(self.proj1(last_hs)), p=self.out_dropout, training=self.training))
         last_hs_proj += last_hs
         
-        output = self.out_layer(last_hs_proj)
+        output = self.out_layer(last_hs_proj).sigmoid()
         return output, last_hs # ouput:[bn,len,4]

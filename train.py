@@ -23,9 +23,10 @@ from script.model import MULTModel
 '''
 
 def get_result_print(batch, pred, step_info, painter, size):
+    pred = pred.cpu()
     with torch.no_grad():
         # filter for PAD
-        mask = batch.pad_mask[0].unsqueeze(-1).repeat(1,4)
+        mask = batch.pad_mask[0].squeeze(0).unsqueeze(-1).repeat(1,4) # [bn,1,len]-> [len,4]
         pred = torch.masked_select(pred[0],mask).reshape(-1,4)
         target = torch.masked_select(batch.bbox_trg[0],mask).reshape(-1,4)
         # scale&format back
@@ -53,9 +54,9 @@ def main(args):
         for i_batch, batch in enumerate(loader):
             optimizer.zero_grad()
             img, bbox, label, target= batch.img.to(device), batch.bbox.to(device), batch.label.to(device), batch.bbox_trg.to(device)
-            mask = batch.mask.to(device), batch.pad_mask.to(device)
-            output, _ = net(img, bbox, label, mask)
-            loss = criterion(output, target)
+            pad_mask, mask = batch.pad_mask.to(device), batch.mask.to(device)
+            output, _ = net(img, bbox, label, pad_mask, mask)
+            loss = criterion(output, target, batch.n_tokens.to(device),  pad_mask)
             loss.backward()
             
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
@@ -80,12 +81,13 @@ def main(args):
         for i_batch, batch in enumerate(loader):
             with torch.no_grad():
                 img, bbox, label, target = batch.img.to(device), batch.bbox.to(device), batch.label.to(device), batch.bbox_trg.to(device)
-                mask = batch.mask.to(device), batch.pad_mask.to(device)
-                output, _ = net(img, bbox, label, mask)
+                pad_mask, mask = batch.pad_mask.to(device), batch.mask.to(device)
+                output, _ = net(img, bbox, label, pad_mask, mask)
+                loss = criterion(output, target, batch.n_tokens.to(device),  pad_mask)
 
                 if i_batch%log_iter == 0:
                     get_result_print(batch, output, [epoch, args.n_epochs], log_painter, args.input_size)
-                loss = criterion(output, target)
+
                 epoch_loss += loss.item()
                 
         epoch_avg_loss = epoch_loss / len(eval_dataloader)
@@ -159,5 +161,5 @@ def cli_main():
 
 
 if __name__=='__main__':
-    # os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+    # os.environ['CUDA_VISIBLE_DEVICES'] = '1' # 如果设置的设备超过3个，DP在汇中返回output的时候会产生问题
     cli_main()

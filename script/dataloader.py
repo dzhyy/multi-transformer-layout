@@ -1,5 +1,4 @@
 # encoding=utf-8
-from tkinter import Frame
 from torch.utils.data import Dataset
 #from utils.layout_data_processor import SortStrategy, LayoutDataProcessor
 # from utils.data import load_layout

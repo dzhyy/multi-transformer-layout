@@ -63,13 +63,14 @@ class MutiLoss(nn.Module):
         self.l1_weight = 1
         self.giou_weight = 1
     
-    def forward(self, boxes, boxes_trg, num_boxes, seq_mask):
+    def forward(self, bboxes, bboxes_trg, num_boxes, seq_mask):
         '''
-        boxes&boxes_trg:(nb,seq_l_4)
-        seq_mask:(nb,seq_l)
+        boxes&boxes_trg:(nb,len, 4)
+        seq_mask:(nb, 1, len)
         '''
-        bboxes = boxes[seq_mask==True,:]
-        bboxes_trg = boxes_trg[seq_mask==True,:]
+        seq_mask = seq_mask.squeeze(1)
+        bboxes = bboxes[seq_mask,:]
+        bboxes_trg = bboxes_trg[seq_mask,:]
 
         loss_l1 = F.l1_loss(bboxes, bboxes_trg, reduction='none')
         loss_l1 = loss_l1.sum() / num_boxes

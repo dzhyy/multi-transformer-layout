@@ -73,26 +73,3 @@ class MultiheadAttention(nn.Module):
         attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
         attn_weights = attn_weights.sum(dim=1) / self.num_heads
         return attn, attn_weights # [25,3,30]
-
-    def in_proj_qkv(self, query):
-        return self._in_proj(query).chunk(3, dim=-1)
-
-    def in_proj_kv(self, key):
-        return self._in_proj(key, start=self.embed_dim).chunk(2, dim=-1)
-
-    def in_proj_q(self, query, **kwargs):
-        return self._in_proj(query, end=self.embed_dim, **kwargs)
-
-    def in_proj_k(self, key):
-        return self._in_proj(key, start=self.embed_dim, end=2 * self.embed_dim)
-
-    def in_proj_v(self, value):
-        return self._in_proj(value, start=2 * self.embed_dim)
-
-    def _in_proj(self, input, start=0, end=None, **kwargs):
-        weight = kwargs.get('weight', self.in_proj_weight)
-        bias = kwargs.get('bias', self.in_proj_bias)
-        weight = weight[start:end, :]
-        if bias is not None:
-            bias = bias[start:end]
-        return F.linear(input, weight, bias)
