@@ -163,5 +163,6 @@ class MULTModel(nn.Module):
         last_hs_proj = self.proj2(F.dropout(F.relu(self.proj1(last_hs)), p=self.out_dropout, training=self.training))
         last_hs_proj += last_hs
         
-        output = self.out_layer(last_hs_proj).sigmoid()
+        last_hs = self.out_layer(last_hs_proj)
+        output = last_hs.sigmoid()
         return output, last_hs # ouput:[bn,len,4]

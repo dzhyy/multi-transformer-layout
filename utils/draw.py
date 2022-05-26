@@ -1,51 +1,28 @@
 import os
 import itertools
 import matplotlib.pyplot as plt
-from PIL import Image,ImageDraw,ImageFont
-from typing import List
-from enum import Enum
+from PIL import Image,ImageDraw
 from script.misc import ClassInfo, RenderMode
 from utils.path import clear_folder, create_folder
 from script.layout_process import masked_select
-
-
-
-def compose_images(image_filepath:List,bboxes:List, background:Image):
-    # image_filepath and bboxes is aligned with index
-    # bboxes: e.g[(0,0,9,9),(10,10,50,50),...] x1y1x2y2 format
-    # background_size: (width,height)
-    # TODO:支持更多类型
-    assert len(image_filepath) == len(bboxes)
-    for file_path,boundding_box in zip(image_filepath,bboxes):
-        x1 = boundding_box[0]
-        y1 = boundding_box[1]
-        x2 = boundding_box[2]
-        y2 = boundding_box[3]
-        width = x2-x1
-        height = y2-y1
-        if width == 0 or height ==0:
-            assert '跳过处理'
-        img = Image.open(file_path)
-        img = img.resize((width,height))
-        background.paste(img,(x1,y1))
-    return background
+import numpy as np
 
 
 class Render():
-    def __init__(self, defalt_mode:RenderMode=RenderMode.SIMPLE):
+    def __init__(self, defalt_mode:RenderMode=RenderMode.BOX):
         super(Render, self).__init__()
         self.class_info = ClassInfo()
         self.background_color = (200,200,200)
         self.defalt_mode = defalt_mode
     
     def __call__(self, framework):
-        if self.defalt_mode == RenderMode.SIMPLE:
+        if self.defalt_mode == RenderMode.BOX:
             return self.render_simple(framework)
         elif self.defalt_mode == RenderMode.IMAGE:
             return self.render_image(framework)
         elif self.defalt_mode ==RenderMode.IMAGEANDTEXT:
             return self.render_image_text(framework)
-        else:
+        elif self.defalt_mode ==RenderMode.IMAGEANDTEXT:
             return self.debug(framework)
     
     def compose_images(self, framework, background:Image, element_idx):
@@ -119,17 +96,27 @@ class Render():
         return page_image
 
 
-class LogPainter():
-    def __init__(self, args, mode:RenderMode=RenderMode.SIMPLE, writer=None):
-        super(LogPainter,self).__init__()
-        self.save_path = os.path.join(args.log_root,'eval_log')
+class Painter():
+    def __init__(self, save_path, mode:RenderMode=RenderMode.BOX, writer=None):
+        super(Painter,self).__init__()
+        self.save_path = save_path
         create_folder(self.save_path)
         clear_folder(self.save_path)
         self.writer = writer
         self.render = Render(mode)
 
+    def _plt_framework(self, framework, title=''):
+        # plt.figure(figsize=(10,5))
+        fig = plt.suptitle(title)
+        
+        plt.title('pred')
+        img = self.render(framework)
+        plt.imshow(img)
+        plt.axis('on')
+        return fig 
+
     # 标签是类别也是图层先后顺序
-    def plt_framework_comparison(self, framework1, framework2, title=''):
+    def _plt_framework_comparison(self, framework1, framework2, title=''):
         # plt.figure(figsize=(10,5))
         fig = plt.suptitle(title)
         
@@ -144,9 +131,12 @@ class LogPainter():
         plt.axis('on')
         return fig
 
-    def log(self, framework1, framework2, name_prefix:str):
+    def draw(self, framework1, framework2=None, name_prefix:str=''):
         title = name_prefix + framework1['name']
-        figure = self.plt_framework_comparison(framework1, framework2, title)
+        if framework2 is None:
+            figure = self._plt_framework(framework1, title)
+        else:
+            figure = self._plt_framework_comparison(framework1, framework2, title)
 
         if self.writer is None:
             plt.savefig(os.path.join(self.save_path, f'{title}.png'))

@@ -7,7 +7,7 @@ class DataFormat(Enum):
     LTWH = 3    # 左上角宽高
 
 class RenderMode(Enum):
-    SIMPLE = 1
+    BOX = 1
     IMAGE = 2
     IMAGEANDTEXT = 3
     DEBUG = 4

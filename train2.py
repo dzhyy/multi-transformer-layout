@@ -21,28 +21,34 @@ from utils.draw import plot_confusion_matrix
 '''
 
 def get_result_print(batch, pred, step_info, painter,args):
+    pred = pred.cpu()
     with torch.no_grad():
-        # filter for PAD
-        mask = batch.seq_mask[0].unsqueeze(-1).repeat(1,4)
-        pred = torch.masked_select(pred[0],mask).reshape(-1,4)
-        target = torch.masked_select(batch.bbox_trg[0],mask).reshape(-1,4)
-        # scale&format back
-        pred1 = box_cxcywh_to_xyxy(pred).cpu().numpy().tolist()
-        bboxes = [scale(bbox,(1,1),args.input_size) for bbox in pred1]
-        '''test0 = box_cxcywh_to_xyxy(batch.bbox_trg[0]).cpu().numpy().tolist()
-        test = [scale(bbox,(1,1),args.input_size) for bbox in test0]'''
+        '''
+        boxes&boxes_trg:(nb,seq_l, 4)
+        pad_mask:(nb, 1, seq_l)
+        '''
+        pad_mask = batch.pad_mask[0][0].squeeze(0)
+        pred = pred[0][pad_mask,:]
+        target = batch.bbox_trg[0][pad_mask,:]
+        
+        # scale&format back, get new frame
+        pred_xyxy = box_cxcywh_to_xyxy(pred).cpu().numpy().tolist()
+        bboxes_xyxy = [scale(bbox,(1,1), size) for bbox in pred_xyxy]
         base_framework = batch.framework[0]
         framework = {}
-        framework['bboxes'] = bboxes
+        framework['bboxes'] = bboxes_xyxy
         framework.update({k:v for k,v in base_framework.items() if k not in framework})
+        
         logging.info(f'epoch_{step_info[0]}/{step_info[1]}:')
         logging.info(f"framework_name: {framework['name']}")
         logging.info(f"framework_labels: {framework['labels']}")
-        logging.info(f'decoder_output_label: {target.cpu().numpy().tolist()}')
-        logging.info(f'decoder_output_pred: {pred.cpu().numpy().tolist()}')
+        logging.info(f'decoder_output_label(cxcywh): {target}')
+        logging.info(f'decoder_output_pred(cxcywh): {pred}')
         painter.log(framework, base_framework, f'epoch_{step_info[0]}_')
 
 def main(args):
+    torch.manual_seed(1111)
+    torch.set_printoptions(precision=2)
 
     def train(model, optimizer, criterion, loader):
         epoch_loss = 0

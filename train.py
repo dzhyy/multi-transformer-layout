@@ -11,7 +11,7 @@ from tensorboardX import SummaryWriter
 from script.lr_scheduler import get_cosine_schedule_with_warmup
 from script.dataloader import LayoutDataset,get_raw_data
 from utils import logger, option, path
-from utils.draw import LogPainter
+from utils.draw import Painter
 from script.misc import RenderMode,DataFormat
 from script.criterion import MutiLoss
 from script.layout_process import box_cxcywh_to_xyxy,scale
@@ -45,7 +45,8 @@ def get_result_print(batch, pred, step_info, painter, size):
 
 
 def main(args):
-
+    torch.set_printoptions(precision=2)
+    
     def train(model, optimizer, criterion, loader):
         epoch_loss = 0
         model.train()
@@ -116,7 +117,7 @@ def main(args):
     model = model.to(device)
     path.clear_folder(os.path.join(args.log_root, "runs"))
     writer = SummaryWriter(comment='layout', log_dir=os.path.join(args.log_root, "runs"))
-    log_painter = LogPainter(args, mode=RenderMode.IMAGE)
+    log_painter = Painter(os.path.join(args.log_root,'eval_log'), mode=RenderMode.IMAGE)
     
     # early stop
     best_perform = float('inf')
