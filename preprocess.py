@@ -6,7 +6,7 @@ from PIL import Image
 import torch
 import numpy as np
 import os
-from utils.option import get_preprocess_args
+from script.option import get_preprocess_args
 from utils.path import create_folder
 
 class FrameDataset(Dataset):

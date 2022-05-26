@@ -2,46 +2,20 @@ import os
 import torch
 import logging
 import time
-from tqdm import tqdm
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from torch.utils.data import random_split
 import torch.nn as nn
 from tensorboardX import SummaryWriter
+from script import option
 from script.lr_scheduler import get_cosine_schedule_with_warmup
 from script.dataloader import LayoutDataset,get_raw_data
-from utils import logger, option, path
+from utils import logger, path
 from utils.draw import Painter
-from script.misc import RenderMode,DataFormat
+from script.misc import RenderMode
 from script.criterion import MutiLoss
-from script.layout_process import box_cxcywh_to_xyxy,scale
 from script.model import MULTModel
-'''
-这个数据集（任务）和之前的不同之处：
-图片需要编码
-文字没有字数
-'''
-
-def get_result_print(batch, pred, step_info, painter, size):
-    pred = pred.cpu()
-    with torch.no_grad():
-        # filter for PAD
-        mask = batch.pad_mask[0].squeeze(0).unsqueeze(-1).repeat(1,4) # [bn,1,len]-> [len,4]
-        pred = torch.masked_select(pred[0],mask).reshape(-1,4)
-        target = torch.masked_select(batch.bbox_trg[0],mask).reshape(-1,4)
-        # scale&format back
-        pred1 = box_cxcywh_to_xyxy(pred).cpu().numpy().tolist()
-        bboxes = [scale(bbox,(1,1), size) for bbox in pred1]
-        base_framework = batch.framework[0]
-        framework = {}
-        framework['bboxes'] = bboxes
-        framework.update({k:v for k,v in base_framework.items() if k not in framework})
-        logging.info(f'epoch_{step_info[0]}/{step_info[1]}:')
-        logging.info(f"framework_name: {framework['name']}")
-        logging.info(f"framework_labels: {framework['labels']}")
-        logging.info(f'decoder_output_label: {target.cpu().numpy().tolist()}')
-        logging.info(f'decoder_output_pred: {pred.cpu().numpy().tolist()}')
-        painter.log(framework, base_framework, f'epoch_{step_info[0]}_')
+from script.result_draw import get_result_print
 
 
 def main(args):

@@ -3,19 +3,21 @@ import os
 import torch
 from tqdm import tqdm
 from torch.utils.data import DataLoader
-from model import language_model
-from utils import option
-from utils.draw import LogPainter
+from script.option import get_testing_args
 from script.rawdata_load import load_specific_raw_data
 from script.misc import RenderMode
-from train2 import get_result_print
+from script.result_draw import get_result_print
+from script.dataloader import LayoutDataset
+from script.model import MULTModel
+from utils.draw import Painter
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '6'
-
-args = option.get_trainning_args()
+print(f'gpu is availabel:{torch.cuda.is_available()}')
+args = get_testing_args()
+device = torch.device('cpu') if args.cpu else torch.device('cuda')
 xmlfiles = ['fashion_0039.xml','food_0601.xml','travel_0351.xml']
-model_path = './experiment/buffer/model.tmp.pth'
-log_painter = LogPainter(args, mode=RenderMode.IMAGE)
+model_path = './experiment/model.epoch_50_f.pth'
+result_savepath = './experiment/eval_log'
+log_painter = Painter(result_savepath, mode=RenderMode.IMAGE)
 
 raw_data = []
 for xmlfile in xmlfiles: 
@@ -24,16 +26,15 @@ for xmlfile in xmlfiles:
         continue
     else:
         raw_data.append(data)
-device = torch.device('cpu') if args.cpu is True else torch.device('cuda:0')
 eval_dataset = LayoutDataset(args, raw_data, device)
 eval_dataloader = DataLoader(eval_dataset,shuffle=False,batch_size=1,collate_fn=eval_dataset.collate_fn)
-args.src_vocab = eval_dataset.layout_processor.vocab_size
-args.tgt_vocab = eval_dataset.layout_processor.vocab_size
-model = language_model.make_model(args)
+model = MULTModel(args)
 model.load_state_dict(torch.load(model_path))
 model.to(device)
 model.eval()
-for batch in tqdm(eval_dataloader, desc='evaluating'):
+for batch in tqdm(eval_dataloader, desc='infer'):
     with torch.no_grad():
-        output = model(batch)
-        get_result_print(batch, output, [1, 1], log_painter, args)
+        img, bbox, label, target= batch.img.to(device), batch.bbox.to(device), batch.label.to(device), batch.bbox_trg.to(device)
+        pad_mask, mask = batch.pad_mask.to(device), batch.mask.to(device)
+        output, _ = model(img, bbox, label, pad_mask, mask)
+        get_result_print(batch, output, [1, 1], log_painter, args.input_size)

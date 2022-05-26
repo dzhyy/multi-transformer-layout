@@ -14,6 +14,8 @@ def get_trainning_args():
     add_log_args(parser)
     return parser.parse_args()
 
+def get_testing_args():
+    return get_trainning_args()
 
 def get_parser():
     parser = argparse.ArgumentParser()

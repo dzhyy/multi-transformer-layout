@@ -5,9 +5,10 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from torch.utils.data import random_split
 from tensorboardX import SummaryWriter
+from script import option
 from script.lr_scheduler import get_cosine_schedule_with_warmup
 from script.dataloader import LayoutDataset,get_raw_data
-from utils import logger, option, path
+from utils import logger, path
 from script.layout_process import box_cxcywh_to_xyxy,scale
 from script.model import MULTModel
 import time

@@ -1,7 +1,7 @@
 from utils.draw import Painter,RenderMode
 from script.dataloader import get_raw_data
 from script.rawdata_load import load_specific_raw_data
-from utils.option import get_preprocess_args 
+from script.option import get_preprocess_args 
 
 def compose_raw_data(save_folder, filename_list = None):
     args = get_preprocess_args()
