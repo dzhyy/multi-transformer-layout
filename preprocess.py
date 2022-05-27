@@ -1,13 +1,33 @@
-from script.dataloader import get_raw_data
-from torch.utils.data import Dataset
-import torchvision.transforms as transforms
-from model.img_encoding2 import get_model
 from PIL import Image
 import torch
 import numpy as np
+from torch import nn
 import os
+from torch.utils.data import Dataset
+import torchvision.transforms as transforms
+import torchvision.models as models
+
 from script.option import get_preprocess_args
+from script.dataloader import get_raw_data
 from utils.path import create_folder
+
+
+class GlobalAvgPool(nn.Module):
+    def __init__(self):
+        super(GlobalAvgPool, self).__init__()
+
+    def forward(self, x):
+        return torch.mean(x, dim=[-2, -1]) # [n,2048,7,10]->[n,2048]
+
+def get_model():
+    print('Loading 2D-ResNet-152 ...')
+    model = models.resnet152(pretrained=True,)
+    # test = list(model.children())[:-2]，去掉池化层和flatten层
+    model = nn.Sequential(*list(model.children())[:-2], GlobalAvgPool())
+    model.eval()
+    print('loaded')
+    return model
+
 
 class FrameDataset(Dataset):
     def __init__(

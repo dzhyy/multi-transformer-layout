@@ -54,7 +54,8 @@ def add_dataset_args(parser):
     group.add_argument('--annotation_folder', default='./dataset/MAGAZINE/layoutdata/annotations', help='')
     group.add_argument('--grid_width', default=45, help='')
     group.add_argument('--grid_height', default=60, help='') # 225*300(div 5->45*60), affect size of 'vocab_size'
-    group.add_argument('--input_size',default=(225,300), help='(width,height)')
+    group.add_argument('--frame_size',default=(225,300), help='(width,height)') # TODO:去掉framesize的限制，扩大使用范围
+    group.add_argument('--img_resize',default=224, help='')
     group.add_argument('--n_classes',default=5, help='')
 
 def add_log_args(parser):

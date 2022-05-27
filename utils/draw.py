@@ -100,10 +100,12 @@ class Painter():
     def __init__(self, save_path, mode:RenderMode=RenderMode.BOX, writer=None):
         super(Painter,self).__init__()
         self.save_path = save_path
-        create_folder(self.save_path)
-        clear_folder(self.save_path)
         self.writer = writer
         self.render = Render(mode)
+
+    def clean_savepath(self):
+        create_folder(self.save_path)
+        clear_folder(self.save_path)
 
     def _plt_framework(self, framework, title=''):
         # plt.figure(figsize=(10,5))

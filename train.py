@@ -9,29 +9,28 @@ import torch.nn as nn
 from tensorboardX import SummaryWriter
 from script import option
 from script.lr_scheduler import get_cosine_schedule_with_warmup
-from script.dataloader import LayoutDataset,get_raw_data
+from script.dataloader import LayoutDataset
 from utils import logger, path
 from utils.draw import Painter
 from script.misc import RenderMode
 from script.criterion import MutiLoss
-from script.model import MULTModel
+from script.model import LayoutMultiTransformer
 from script.result_draw import get_result_print
 
 
 def main(args):
     torch.set_printoptions(precision=2)
     
-    def train(model, optimizer, criterion, loader):
+    def train(model, optimizer, criterion, loader, device):
         epoch_loss = 0
         model.train()
         net = nn.DataParallel(model)
         start_time = time.time()
-        for i_batch, batch in enumerate(loader):
+        for i_batch, raw_batch in enumerate(loader):
             optimizer.zero_grad()
-            img, bbox, label, target= batch.img.to(device), batch.bbox.to(device), batch.label.to(device), batch.bbox_trg.to(device)
-            pad_mask, mask = batch.pad_mask.to(device), batch.mask.to(device)
-            output, _ = net(img, bbox, label, pad_mask, mask)
-            loss = criterion(output, target, batch.n_tokens.to(device),  pad_mask)
+            output, batch = net(raw_batch, device)
+            target = batch.bbox_trg.to(device)
+            loss = criterion(output, target, batch.n_tokens.to(device),  batch.pad_mask.to(device))
             loss.backward()
             
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
@@ -46,19 +45,19 @@ def main(args):
         epoch_avg_loss = epoch_loss / len(train_dataloader)
         return epoch_avg_loss
 
-    def evaluate(model, criterion, loader, log_painter):
+    def evaluate(model, criterion, loader, device, log_painter):
         epoch_loss = 0
         num_log_samples = 3
         log_iter = len(loader) // num_log_samples
 
         model.eval()
         net = nn.DataParallel(model)
-        for i_batch, batch in enumerate(loader):
+        for i_batch, raw_batch in enumerate(loader):
             with torch.no_grad():
-                img, bbox, label, target = batch.img.to(device), batch.bbox.to(device), batch.label.to(device), batch.bbox_trg.to(device)
-                pad_mask, mask = batch.pad_mask.to(device), batch.mask.to(device)
-                output, _ = net(img, bbox, label, pad_mask, mask)
-                loss = criterion(output, target, batch.n_tokens.to(device),  pad_mask)
+                optimizer.zero_grad()
+                output, batch = net(raw_batch, device)
+                target = batch.bbox_trg.to(device)
+                loss = criterion(output, target, batch.n_tokens.to(device),  batch.pad_mask.to(device))
 
                 if i_batch%log_iter == 0:
                     get_result_print(batch, output, [epoch, args.n_epochs], log_painter, args.input_size)
@@ -71,15 +70,14 @@ def main(args):
     logger.set_logger(os.path.join(args.log_root,'train.log.txt'))
     device = torch.device('cpu') if args.cpu is True else torch.device('cuda')
     
-    raw_data = get_raw_data(args,use_buffer=True)
-    dataset = LayoutDataset(args, raw_data, device) # Num fo samples: 3860
+    dataset = LayoutDataset(args, use_buffer=True) # Num fo samples: 3860
     train_dataset, eval_dataset = random_split(dataset,[int(0.9*len(dataset)), len(dataset) - int(0.9*len(dataset))])
     train_dataloader = DataLoader(train_dataset,shuffle=True,batch_size=args.batch_size,collate_fn=dataset.collate_fn)
     eval_dataloader = DataLoader(eval_dataset,shuffle=False,batch_size=args.batch_size,collate_fn=dataset.collate_fn)
     logging.info(f'Num fo samples:{len(dataset)},train samples:{len(train_dataset)},evaluat samples:{len(eval_dataset)}')
     logging.info(f'Device:{device}')
 
-    model = MULTModel(args)
+    model = LayoutMultiTransformer(args)
     logging.info(args)
     
     criterion = MutiLoss()
@@ -92,6 +90,7 @@ def main(args):
     path.clear_folder(os.path.join(args.log_root, "runs"))
     writer = SummaryWriter(comment='layout', log_dir=os.path.join(args.log_root, "runs"))
     log_painter = Painter(os.path.join(args.log_root,'eval_log'), mode=RenderMode.IMAGE)
+    log_painter.clean_savepath()
     
     # early stop
     best_perform = float('inf')
@@ -102,8 +101,8 @@ def main(args):
         logging.info(f'\nepoch_{epoch}/{args.n_epochs}:')
 
         start = time.time()
-        train_loss = train(model, optimizer, criterion, train_dataloader)
-        eval_loss = evaluate(model, criterion, eval_dataloader, log_painter)
+        train_loss = train(model, optimizer, criterion, train_dataloader, device)
+        eval_loss = evaluate(model, criterion, eval_dataloader, device, log_painter)
         end = time.time()
 
         logging.info('Epoch {:2d} | Time {:5.4f} sec | train Loss {:5.4f} | eval Loss {:5.4f}'.format(epoch, end-start, train_loss, eval_loss))
